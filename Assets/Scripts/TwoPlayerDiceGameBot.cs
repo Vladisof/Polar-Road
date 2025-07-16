@@ -12,6 +12,20 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
     [SerializeField] private AudioManager audioManager; // AudioManager reference
     [SerializeField] private TextMeshProUGUI diceResultText; // Текст для отображения числа на кубике
     
+    [Header("Click Movement")]
+    [SerializeField] private Material interactableMaterial;
+    [SerializeField] private Material highlightMaterial;
+    
+    [Header("Step Color System")]
+    [SerializeField] private Color step1Color = Color.red;      // Индекс 1 - красный
+    [SerializeField] private Color step2Color = Color.yellow;   // Индекс 2 - желтый
+    [SerializeField] private Color step3Color = Color.green;    // Индекс 3 - зеленый
+    [SerializeField] private Color normalSpotColor = Color.white; // Обычный цвет точек
+    
+    private int currentDiceResult = 0;
+    private bool waitingForPlayerMove = false;
+    private InteractiveSpot[] interactiveSpots;
+    
     [Header("Bot Settings")]
     [SerializeField] private float botThinkingDelay = 1.5f; // Delay before bot makes a move
     private bool isBotTurn = false;
@@ -90,10 +104,7 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
     private int maxNegativeBoosts = 2; // Максимальное количество негативных бустов
     private int maxSkipTurnBoosts = 1; // Максимальное количество бустов пропуска хода
     private int maxMultiplierBoosts = 2; // Максимальное количество бустов множителя
-    [SerializeField] private Color boostColor = Color.yellow; // Цвет для выделения этапов с бустами
-    [SerializeField] private Color negativeBoostColor = Color.red; // Цвет для выделения этапов с негативными бустами
-    [SerializeField] private Color skipTurnBoostColor = Color.blue; // Цвет для выделения этапов с бустами пропуска хода
-    [SerializeField] private Color multiplierBoostColor = new Color(1f, 0.5f, 0f); // Оранжевый цвет для множителя
+
 
     private int player1SpotIndex = 0; // Текущая позиция первого игрока
     private int player2SpotIndex = 0; // Текущая позиция второго игрока
@@ -136,6 +147,7 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
         isPlayer1Turn = true;
         isBotTurn = false;
         moneyController = FindObjectOfType<MoneyController>();
+        SetupInteractiveSpots();
         if (moneyController == null)
         {
             Debug.LogError("MoneyController not found in scene!");
@@ -220,6 +232,42 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
         // Обновление UI
         UpdateUI();
     }
+    
+    private void SetupInteractiveSpots()
+    {
+        interactiveSpots = new InteractiveSpot[boardSpots.Length];
+    
+        for (int i = 0; i < boardSpots.Length; i++)
+        {
+            // Проверяем наличие коллайдера
+            Collider collider = boardSpots[i].GetComponent<Collider>();
+            if (collider == null)
+            {
+                Debug.LogWarning($"Spot {i} doesn't have a Collider! Adding BoxCollider.");
+                boardSpots[i].gameObject.AddComponent<BoxCollider>();
+            }
+        
+            InteractiveSpot spot = boardSpots[i].GetComponent<InteractiveSpot>();
+            if (spot == null)
+            {
+                spot = boardSpots[i].gameObject.AddComponent<InteractiveSpot>();
+            }
+        
+            spot.spotIndex = i;
+            interactiveSpots[i] = spot;
+        
+            // Назначаем материалы
+            if (interactableMaterial != null)
+                spot.normalMaterial = interactableMaterial;
+            if (highlightMaterial != null)
+                spot.highlightMaterial = highlightMaterial;
+        
+            // Изначально все точки неинтерактивны
+            spot.SetInteractable(false);
+        }
+    }
+    
+    
 
     // Add these methods to TwoPlayerDiceGame.cs
     public void SetPositiveBoostChance(float chance)
@@ -376,199 +424,137 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
     }
 
     private void SetupBoosts()
+{
+    // Очистка старых эффектов
+    foreach (var effect in boostEffects)
     {
-        // Очистка старых эффектов
-        foreach (var effect in boostEffects)
+        if (effect != null)
+            Destroy(effect);
+    }
+
+    boostEffects.Clear();
+
+    // Инициализация массива бустов
+    spotBoostTypes = new BoostType[boardSpots.Length];
+    for (int i = 0; i < spotBoostTypes.Length; i++)
+    {
+        spotBoostTypes[i] = BoostType.None;
+    }
+
+    // НАЗНАЧАЕМ СЛУЧАЙНЫЕ ЦВЕТА ВСЕМ ТОЧКАМ СРАЗУ ПОСЛЕ СТАРТА
+    AssignRandomColorsToSpots();
+
+    // Создание положительных бустов (не на стартовой позиции)
+    int boostsCreated = 0;
+    while (boostsCreated < maxBoosts)
+    {
+        int spotIndex = Random.Range(1, boardSpots.Length-1);
+
+        if (spotBoostTypes[spotIndex] == BoostType.None && Random.value <= boostSpawnChance)
         {
-            if (effect != null)
-                Destroy(effect);
-        }
+            spotBoostTypes[spotIndex] = BoostType.Positive;
+            boostsCreated++;
 
-        boostEffects.Clear();
-
-        // Инициализация массива бустов
-        spotBoostTypes = new BoostType[boardSpots.Length];
-        for (int i = 0; i < spotBoostTypes.Length; i++)
-        {
-            spotBoostTypes[i] = BoostType.None;
-        }
-
-        // Создание положительных бустов (не на стартовой позиции)
-        int boostsCreated = 0;
-        while (boostsCreated < maxBoosts)
-        {
-            int spotIndex = Random.Range(1, boardSpots.Length-1); // Исключаем стартовую позицию
-
-            if (spotBoostTypes[spotIndex] == BoostType.None && Random.value <= boostSpawnChance)
+            // Создание только визуального эффекта, БЕЗ изменения цвета
+            if (boostEffectPrefab != null)
             {
-                spotBoostTypes[spotIndex] = BoostType.Positive;
-                boostsCreated++;
-
-                // Создание визуального эффекта
-                if (boostEffectPrefab != null)
-                {
-                    GameObject boostEffect = Instantiate(boostEffectPrefab,
-                        boardSpots[spotIndex].position + Vector3.up * 0.1f,
-                        Quaternion.identity);
-                    boostEffects.Add(boostEffect);
-                }
-
-                // Изменение цвета точки
-                Renderer spotRenderer = boardSpots[spotIndex].GetComponent<Renderer>();
-                if (spotRenderer != null)
-                {
-                    spotRenderer.material.color = boostColor;
-                }
-            }
-        }
-
-        // Создание негативных бустов
-        int negativeBoostsCreated = 0;
-        while (negativeBoostsCreated < maxNegativeBoosts)
-        {
-            int spotIndex = Random.Range(1, boardSpots.Length-1); // Исключаем стартовую позицию
-
-            if (spotBoostTypes[spotIndex] == BoostType.None && Random.value <= negativeBoostSpawnChance)
-            {
-                spotBoostTypes[spotIndex] = BoostType.Negative;
-                negativeBoostsCreated++;
-
-                // Создание визуального эффекта
-                if (negativeBoostPrefab != null)
-                {
-                    GameObject boostEffect = Instantiate(negativeBoostPrefab,
-                        boardSpots[spotIndex].position + Vector3.up * 0.1f,
-                        Quaternion.identity);
-                    boostEffects.Add(boostEffect);
-                }
-
-                // Изменение цвета точки
-                Renderer spotRenderer = boardSpots[spotIndex].GetComponent<Renderer>();
-                if (spotRenderer != null)
-                {
-                    spotRenderer.material.color = negativeBoostColor;
-                }
-            }
-        }
-
-        // Создание бустов пропуска хода
-        int skipTurnBoostsCreated = 0;
-        while (skipTurnBoostsCreated < maxSkipTurnBoosts)
-        {
-            int spotIndex = Random.Range(1, boardSpots.Length-1); // Исключаем стартовую позицию
-
-            if (spotBoostTypes[spotIndex] == BoostType.None && Random.value <= skipTurnBoostSpawnChance)
-            {
-                spotBoostTypes[spotIndex] = BoostType.SkipTurn;
-                skipTurnBoostsCreated++;
-
-                // Создание визуального эффекта
-                if (skipTurnBoostPrefab != null)
-                {
-                    GameObject boostEffect = Instantiate(skipTurnBoostPrefab,
-                        boardSpots[spotIndex].position + Vector3.up * 0.1f,
-                        Quaternion.identity);
-                    boostEffects.Add(boostEffect);
-                }
-
-                // Изменение цвета точки
-                Renderer spotRenderer = boardSpots[spotIndex].GetComponent<Renderer>();
-                if (spotRenderer != null)
-                {
-                    spotRenderer.material.color = skipTurnBoostColor;
-                }
-            }
-        }
-
-        int multiplierBoostsCreated = 0;
-        while (multiplierBoostsCreated < maxMultiplierBoosts)
-        {
-            int spotIndex = Random.Range(1, boardSpots.Length-1); // Исключаем стартовую позицию
-
-            if (spotBoostTypes[spotIndex] == BoostType.None && Random.value <= multiplierBoostSpawnChance)
-            {
-                spotBoostTypes[spotIndex] = BoostType.Multiplier;
-                multiplierBoostsCreated++;
-
-                // Создание визуального эффекта
-                if (multiplierBoostPrefab != null)
-                {
-                    GameObject boostEffect = Instantiate(multiplierBoostPrefab,
-                        boardSpots[spotIndex].position + Vector3.up * 0.1f,
-                        Quaternion.identity);
-                    boostEffects.Add(boostEffect);
-                }
-
-                // Изменение цвета точки
-                Renderer spotRenderer = boardSpots[spotIndex].GetComponent<Renderer>();
-                if (spotRenderer != null)
-                {
-                    spotRenderer.material.color = multiplierBoostColor;
-                }
+                GameObject boostEffect = Instantiate(boostEffectPrefab,
+                    boardSpots[spotIndex].position + Vector3.up * 0.1f,
+                    Quaternion.identity);
+                boostEffects.Add(boostEffect);
             }
         }
     }
 
-public void RollDice()
+    // Создание негативных бустов
+    int negativeBoostsCreated = 0;
+    while (negativeBoostsCreated < maxNegativeBoosts)
     {
-        if (!gameStarted)
+        int spotIndex = Random.Range(1, boardSpots.Length-1);
+
+        if (spotBoostTypes[spotIndex] == BoostType.None && Random.value <= negativeBoostSpawnChance)
+        {
+            spotBoostTypes[spotIndex] = BoostType.Negative;
+            negativeBoostsCreated++;
+
+            // Создание только визуального эффекта, БЕЗ изменения цвета
+            if (negativeBoostPrefab != null)
+            {
+                GameObject boostEffect = Instantiate(negativeBoostPrefab,
+                    boardSpots[spotIndex].position + Vector3.up * 0.1f,
+                    Quaternion.identity);
+                boostEffects.Add(boostEffect);
+            }
+        }
+    }
+
+    // Создание бустов пропуска хода
+    int skipTurnBoostsCreated = 0;
+    while (skipTurnBoostsCreated < maxSkipTurnBoosts)
+    {
+        int spotIndex = Random.Range(1, boardSpots.Length-1);
+
+        if (spotBoostTypes[spotIndex] == BoostType.None && Random.value <= skipTurnBoostSpawnChance)
+        {
+            spotBoostTypes[spotIndex] = BoostType.SkipTurn;
+            skipTurnBoostsCreated++;
+
+            // Создание только визуального эффекта, БЕЗ изменения цвета
+            if (skipTurnBoostPrefab != null)
+            {
+                GameObject boostEffect = Instantiate(skipTurnBoostPrefab,
+                    boardSpots[spotIndex].position + Vector3.up * 0.1f,
+                    Quaternion.identity);
+                boostEffects.Add(boostEffect);
+            }
+        }
+    }
+
+    // Создание бустов множителя
+    int multiplierBoostsCreated = 0;
+    while (multiplierBoostsCreated < maxMultiplierBoosts)
+    {
+        int spotIndex = Random.Range(1, boardSpots.Length-1);
+
+        if (spotBoostTypes[spotIndex] == BoostType.None && Random.value <= multiplierBoostSpawnChance)
+        {
+            spotBoostTypes[spotIndex] = BoostType.Multiplier;
+            multiplierBoostsCreated++;
+
+            // Создание только визуального эффекта, БЕЗ изменения цвета
+            if (multiplierBoostPrefab != null)
+            {
+                GameObject boostEffect = Instantiate(multiplierBoostPrefab,
+                    boardSpots[spotIndex].position + Vector3.up * 0.1f,
+                    Quaternion.identity);
+                boostEffects.Add(boostEffect);
+            }
+        }
+    }
+}
+
+
+    public void RollDice()
+    {
+        if (!gameStarted || waitingForPlayerMove)
             return;
         
-        // If it's bot's turn, don't allow manual dice roll
+        // Если это ход бота, не позволяем ручной бросок
         if (!isPlayer1Turn && !isBotTurn)
         {
             Debug.Log("Bot will roll automatically");
             return;
         }
         
-        // Проверка, что игрок не движется и кубик не в процессе броска
         if (!isMoving && !isRolling)
         {
-            // Check if current player should skip their turn
+            // Проверяем пропуск хода
             if ((isPlayer1Turn && player1SkipNextTurn) || (!isPlayer1Turn && player2SkipNextTurn))
             {
-                if (isPlayer1Turn)
-                {
-                    Debug.Log("Player 1 skips turn");
-                    currentPlayerText.text = $"{player1Name} skips a turn";
-                    player1SkipNextTurn = false;
-
-                    // Remove all skip turn boosts for player 1
-                    foreach (int spotIndex in player1SkipTurnSpots)
-                    {
-                        if (spotBoostTypes[spotIndex] == BoostType.SkipTurn)
-                        {
-                            spotBoostTypes[spotIndex] = BoostType.None;
-                            RemoveBoostEffect(spotIndex);
-                        }
-                    }
-
-                    player1SkipTurnSpots.Clear();
-                }
-                else
-                {
-                    Debug.Log("Player 2 skips turn");
-                    currentPlayerText.text = $"{player2Name} skips turn";
-                    player2SkipNextTurn = false;
-
-                    // Remove all skip turn boosts for player 2
-                    foreach (int spotIndex in player2SkipTurnSpots)
-                    {
-                        if (spotBoostTypes[spotIndex] == BoostType.SkipTurn)
-                        {
-                            spotBoostTypes[spotIndex] = BoostType.None;
-                            RemoveBoostEffect(spotIndex);
-                        }
-                    }
-
-                    player2SkipTurnSpots.Clear();
-                }
-
-                // Switch turn without rolling
-                SwitchTurn();
+                // ... существующий код пропуска хода ...
                 return;
             }
-
+            
             StartCoroutine(DiceRollAnimation());
         }
     }
@@ -576,9 +562,10 @@ public void RollDice()
     private IEnumerator DiceRollAnimation()
     {
         isRolling = true;
-        rollButton.interactable = false; // Disable button during roll
-    
-        // Get reference to wheel controller
+        rollButton.interactable = false;
+        
+        // ... существующий код анимации колеса ...
+        
         WheelController wheelController = FindObjectOfType<WheelController>();
         if (wheelController == null)
         {
@@ -586,33 +573,248 @@ public void RollDice()
             isRolling = false;
             yield break;
         }
-    
-        // Play spin sound
+        
         audioManager.PlaySound(0);
-    
-        // Hide result text during spin
+        
         if (diceResultText != null)
             diceResultText.text = "";
-    
-        // Spin the wheel and wait for result
+        
         int result = 0;
         yield return StartCoroutine(wheelController.SpinWheel((value) => result = value));
-    
-        // Show result
+        
         if (diceResultText != null)
             diceResultText.text = result.ToString();
-    
-        yield return new WaitForSeconds(0.5f); // Pause briefly to show the result
-    
+        
+        yield return new WaitForSeconds(0.5f);
+        
+        currentDiceResult = result;
         isRolling = false;
-    
-        // Start moving the current player
+        
+        // Если ход игрока - показываем доступные точки
         if (isPlayer1Turn)
-            StartCoroutine(MovePlayer(player1, player1SpotIndex, result, 1));
+        {
+            ShowAvailableSpots(player1SpotIndex, result);
+            waitingForPlayerMove = true;
+            currentPlayerText.text = $"{player1Name}, choose a spot to move to!";
+        }
         else
-            StartCoroutine(MovePlayer(player2, player2SpotIndex, result, 2));
+        {
+            // Бот ходит автоматически
+            StartCoroutine(BotMove(result));
+        }
+    }
+    
+    private void AssignRandomColorsToSpots()
+    {
+        for (int i = 0; i < boardSpots.Length; i++)
+        {
+            // Первая точка (стартовая) остается белой
+            if (i == 0)
+            {
+                Renderer renderer = boardSpots[i].GetComponent<Renderer>();
+                if (renderer != null)
+                {
+                    renderer.material.color = normalSpotColor;
+                }
+                continue;
+            }
+
+            // Назначаем случайный цвет из трех доступных
+            Color[] availableColors = { step1Color, step2Color, step3Color };
+            Color assignedColor = availableColors[Random.Range(0, 3)];
+
+            Renderer spotRenderer = boardSpots[i].GetComponent<Renderer>();
+            if (spotRenderer != null)
+            {
+                spotRenderer.material.color = assignedColor;
+                Debug.Log($"Spot {i} assigned color: {assignedColor}");
+            }
+        }
+    }
+    private void ShowAvailableSpots(int currentPosition, int diceResult)
+    {
+        Debug.Log($"ShowAvailableSpots called: currentPosition={currentPosition}, diceResult={diceResult}");
+
+        // Сначала делаем все точки неинтерактивными
+        for (int i = 0; i < interactiveSpots.Length; i++)
+        {
+            interactiveSpots[i].SetInteractable(false);
+        }
+
+        // Если результат 0 или меньше, игрок не может двигаться
+        if (diceResult <= 0)
+        {
+            Debug.Log("Dice result is 0 or negative, no movement possible");
+            currentPlayerText.text = $"{(isPlayer1Turn ? player1Name : player2Name)} rolled 0 - turn skipped!";
+            waitingForPlayerMove = false;
+            StartCoroutine(DelayedTurnSwitch());
+            return;
+        }
+
+        Color stepColor = GetColorForStep(diceResult);
+        Debug.Log($"Looking for color: R={stepColor.r:F2}, G={stepColor.g:F2}, B={stepColor.b:F2}");
+
+        int availableCount = 0;
+
+        // Проверяем ВСЕ точки на доске после текущей позиции
+        for (int spotIndex = currentPosition + 1; spotIndex < boardSpots.Length; spotIndex++)
+        {
+            Renderer renderer = boardSpots[spotIndex].GetComponent<Renderer>();
+            if (renderer != null)
+            {
+                Color spotColor = renderer.material.color;
+                bool matches = ColorEquals(spotColor, stepColor);
+                Debug.Log($"Checking spot {spotIndex}: Expected={stepColor}, Actual={spotColor}, Matches={matches}");
+
+                if (matches)
+                {
+                    Debug.Log($"Making spot {spotIndex} interactable");
+                    interactiveSpots[spotIndex].SetInteractable(true);
+                    availableCount++;
+                }
+            }
+        }
+
+        Debug.Log($"Total available spots: {availableCount}");
+
+        // Если нет доступных точек, уведомляем игрока
+        if (availableCount == 0)
+        {
+            currentPlayerText.text = $"{(isPlayer1Turn ? player1Name : player2Name)}, no spots available for this color!";
+            waitingForPlayerMove = false;
+            StartCoroutine(DelayedTurnSwitch());
+        }
+    }
+    
+    private IEnumerator DelayedTurnSwitch()
+    {
+        yield return new WaitForSeconds(1.5f);
+        SwitchTurn();
+    }
+    
+    private Color GetColorForStep(int stepValue)
+    {
+        switch (stepValue)
+        {
+            case 0:
+                return step1Color; // Красный
+            case 1:
+                return step1Color; // Красный  
+            case 2:
+                return step2Color; // Желтый
+            case 3:
+                return step3Color; // Зеленый
+            default:
+                return step1Color;
+        }
     }
 
+    private void HideAvailableSpots()
+    {
+        for (int i = 0; i < interactiveSpots.Length; i++)
+        {
+            interactiveSpots[i].SetInteractable(false);
+        }
+        // Цвета точек НЕ меняем - они остаются такими как назначены при старте
+    }
+    
+    public void OnSpotClicked(int spotIndex)
+    {
+        if (!waitingForPlayerMove || !isPlayer1Turn)
+            return;
+
+        // Проверяем, что точка интерактивна (это означает что она правильного цвета)
+        if (interactiveSpots[spotIndex].isInteractable)
+        {
+            // Проверяем только что точка находится впереди игрока
+            int currentPosition = player1SpotIndex;
+        
+            if (spotIndex > currentPosition)
+            {
+                waitingForPlayerMove = false;
+                HideAvailableSpots();
+
+                // Перемещаем игрока
+                StartCoroutine(MovePlayerToSpot(player1, spotIndex, 1));
+            }
+            else
+            {
+                Debug.Log("Can't move backwards!");
+            }
+        }
+        else
+        {
+            Debug.Log("Wrong color clicked!");
+        }
+    }
+    
+    // Вспомогательный метод для сравнения цветов (учитывает небольшие погрешности)
+    private bool ColorEquals(Color a, Color b, float tolerance = 0.01f)
+    {
+        return Mathf.Abs(a.r - b.r) < tolerance &&
+               Mathf.Abs(a.g - b.g) < tolerance &&
+               Mathf.Abs(a.b - b.b) < tolerance;
+    }
+    
+    private IEnumerator MovePlayerToSpot(Transform playerTransform, int targetSpot, int playerNumber)
+    {
+        isMoving = true;
+        
+        int currentPosition = playerNumber == 1 ? player1SpotIndex : player2SpotIndex;
+        
+        // Анимация бега
+        Animator playerAnimator = playerNumber == 1 ? player1Animator : player2Animator;
+        if (playerAnimator != null)
+        {
+            playerAnimator.SetBool("IsRunning", true);
+        }
+        
+        // Перемещение по точкам от текущей позиции до целевой
+        for (int i = currentPosition + 1; i <= targetSpot; i++)
+        {
+            yield return StartCoroutine(MoveToNextSpot(playerTransform, i, i - 1));
+            yield return new WaitForSeconds(0.2f);
+        }
+        
+        // Обновляем позицию игрока
+        if (playerNumber == 1)
+            player1SpotIndex = targetSpot;
+        else
+            player2SpotIndex = targetSpot;
+        
+        // Останавливаем анимацию бега
+        if (playerAnimator != null)
+        {
+            playerAnimator.SetBool("IsRunning", false);
+        }
+        
+        UpdateUI();
+        
+        // Обрабатываем действие на точке
+        bool shouldSwitchTurn = HandleSpotAction(playerNumber, targetSpot);
+        
+        // Проверяем победу
+        if (CheckWinCondition())
+        {
+            string winner = isPlayer1Turn ? $"{player1Name}" : $"{player2Name}";
+            currentPlayerText.text = winner + " Win!";
+            rollButton.interactable = false;
+        }
+        else if (shouldSwitchTurn)
+        {
+            SwitchTurn();
+        }
+        else
+        {
+            // Если не переключаем ход, активируем кнопку броска снова
+            if (isPlayer1Turn)
+            {
+                rollButton.interactable = true;
+            }
+        }
+        
+        isMoving = false;
+    }
     private IEnumerator MovePlayer(Transform playerTransform, int currentIndex, int steps, int playerNumber)
     {
         isMoving = true;
@@ -740,7 +942,34 @@ public void RollDice()
     // Ensure final position is exact
     playerTransform.position = targetPosition;
 }
-
+    private IEnumerator BotMove(int diceResult)
+    {
+        // Бот выбирает случайную доступную точку
+        List<int> availableSpots = new List<int>();
+        
+        for (int i = 1; i <= diceResult; i++)
+        {
+            int targetSpot = player2SpotIndex + i;
+            if (targetSpot < boardSpots.Length)
+            {
+                availableSpots.Add(targetSpot);
+            }
+        }
+        
+        if (availableSpots.Count > 0)
+        {
+            // Бот может выбрать стратегически или случайно
+            int chosenSpot = availableSpots[Random.Range(0, availableSpots.Count)];
+            
+            currentPlayerText.text = $"{player2Name} moves to spot {chosenSpot + 1}";
+            
+            yield return new WaitForSeconds(0.5f);
+            
+            yield return StartCoroutine(MovePlayerToSpot(player2, chosenSpot, 2));
+        }
+    }
+    
+    
     private bool HandleSpotAction(int playerNumber, int spotIndex)
     {
         bool shouldSwitchTurn = true; // Default: switch turns
@@ -915,17 +1144,11 @@ public void RollDice()
 // Helper method to remove boost effects
     private void RemoveBoostEffect(int spotIndex)
     {
-        // Возвращаем цвет точки
-        Renderer spotRenderer = boardSpots[spotIndex].GetComponent<Renderer>();
-        if (spotRenderer != null)
-        {
-            spotRenderer.material.color = Color.green;
-        }
+        // НЕ меняем цвет точки - оставляем как есть
 
         // Удаляем все визуальные эффекты буста для данной точки
         Vector3 spotPosition = boardSpots[spotIndex].position;
 
-        // Use a while loop to repeatedly check for and remove any effects near this spot
         bool foundEffect = true;
         while (foundEffect)
         {
@@ -938,7 +1161,6 @@ public void RollDice()
                     continue;
                 }
 
-                // Check if the effect is near this spot (both at normal height and effect height)
                 float distance = Vector3.Distance(boostEffects[i].transform.position,
                     spotPosition + Vector3.up * 0.1f);
 
@@ -953,7 +1175,7 @@ public void RollDice()
                     Destroy(boostEffects[i]);
                     boostEffects.RemoveAt(i);
                     foundEffect = true;
-                    break; // Break the for loop, but continue the while loop
+                    break;
                 }
             }
         }

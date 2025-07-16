@@ -87,11 +87,11 @@ public class WheelController : MonoBehaviour
         }
 
         // Ensure we had at least one trigger hit
-        if (lastHitTriggerValue == 0)
-        {
-            lastHitTriggerValue = Random.Range(1, 7);
-            Debug.LogWarning("No trigger was hit during spin, using random value: " + lastHitTriggerValue);
-        }
+       // if (lastHitTriggerValue == 0)
+       // {
+         //   lastHitTriggerValue = Random.Range(1, 7);
+        //    Debug.LogWarning("No trigger was hit during spin, using random value: " + lastHitTriggerValue);
+        //}
 
         // Wheel has stopped
         isSpinning = false;
