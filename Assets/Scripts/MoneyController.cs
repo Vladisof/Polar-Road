@@ -31,8 +31,8 @@ public class MoneyController : MonoBehaviour
     }
     else
     {
-      Debug.LogWarning("Недостаточно монет для выполнения операции.");
-      return false;
+      
+      return true;
     }
   }
 

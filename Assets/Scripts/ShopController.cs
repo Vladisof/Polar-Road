@@ -43,9 +43,10 @@ public class ShopController : MonoBehaviour
 
     public void BackToMenu()
     {
-        MenuButtons.SetActive(false);
         selectedItemLoader1.UpdatePurchasedItems();
-        StartCoroutine(MoveCameraToShop());
+        MenuButtons.SetActive(true);
+        Menu.SetActive(true);
+        gameObject.SetActive(false);
     }
 
     private IEnumerator MoveCameraToShop()

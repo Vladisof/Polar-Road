@@ -11,7 +11,7 @@ public class WheelController : MonoBehaviour
     // Optional: Add minimum spin time to ensure it always spins at least this long
     [SerializeField] private float minimumSpinTime = 3.0f; 
 
-    private bool isSpinning = false;
+    public bool isSpinning = false;
     private int lastHitTriggerValue = 0;
 
     // Reference to your TwoPlayerDiceGameBot script
@@ -31,6 +31,11 @@ public class WheelController : MonoBehaviour
             lastHitTriggerValue = value;
             Debug.Log($"Wheel trigger hit: {value}");
         }
+    }
+
+    public bool IsSpinning()
+    {
+        return isSpinning;
     }
 
     public IEnumerator SpinWheel(System.Action<int> onComplete)

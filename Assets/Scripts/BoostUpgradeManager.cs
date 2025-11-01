@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿using System;
+using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 
@@ -7,7 +8,7 @@ public class BoostUpgradeManager : MonoBehaviour
     [Header("Upgrade Buttons")]
     [SerializeField] private Button decreaseNegativeBoostButton;
     [SerializeField] private Button increasePositiveBoostButton;
-    [SerializeField] private Button decreaseSkipTurnButton;
+    //[SerializeField] private Button decreaseSkipTurnButton;
     [SerializeField] private Button increaseMultiplierButton;
 
     [Header("Upgrade Costs")]
@@ -52,11 +53,11 @@ public class BoostUpgradeManager : MonoBehaviour
         if (increasePositiveBoostButton)
             increasePositiveBoostButton.onClick.AddListener(() => UpgradeBoost(1));
         
-        if (decreaseSkipTurnButton)
-            decreaseSkipTurnButton.onClick.AddListener(() => UpgradeBoost(2));
+        //if (decreaseSkipTurnButton)
+            //decreaseSkipTurnButton.onClick.AddListener(() => UpgradeBoost(2));
         
         if (increaseMultiplierButton)
-            increaseMultiplierButton.onClick.AddListener(() => UpgradeBoost(3));
+            increaseMultiplierButton.onClick.AddListener(() => UpgradeBoost(2));
     }
 
     private void UpgradeBoost(int boostType)
@@ -74,11 +75,7 @@ public class BoostUpgradeManager : MonoBehaviour
                 currentLevel = increasePositiveBoostLevel;
                 costArray = increasePositiveBoostCosts;
                 break;
-            case 2: // Decrease skip turn chance
-                currentLevel = decreaseSkipTurnLevel;
-                costArray = decreaseSkipTurnCosts;
-                break;
-            case 3: // Increase multiplier chance
+            case 2: // Increase multiplier chance
                 currentLevel = increaseMultiplierLevel;
                 costArray = increaseMultiplierCosts;
                 break;
@@ -102,9 +99,6 @@ public class BoostUpgradeManager : MonoBehaviour
                     increasePositiveBoostLevel++;
                     break;
                 case 2:
-                    decreaseSkipTurnLevel++;
-                    break;
-                case 3:
                     increaseMultiplierLevel++;
                     break;
             }
@@ -117,20 +111,18 @@ public class BoostUpgradeManager : MonoBehaviour
 
     private void UpdateUITexts()
     {
-        if (upgradeLevelTexts.Length >= 4)
+        if (upgradeLevelTexts.Length >= 3)
         {
             upgradeLevelTexts[0].text = "Lvl: " + decreaseNegativeBoostLevel;
             upgradeLevelTexts[1].text = "Lvl: " + increasePositiveBoostLevel;
-            upgradeLevelTexts[2].text = "Lvl: " + decreaseSkipTurnLevel;
-            upgradeLevelTexts[3].text = "Lvl: " + increaseMultiplierLevel;
+            upgradeLevelTexts[2].text = "Lvl: " + increaseMultiplierLevel;
         }
 
-        if (upgradeCostTexts.Length >= 4)
+        if (upgradeCostTexts.Length >= 3)
         {
             UpdateCostText(0, decreaseNegativeBoostLevel, decreaseNegativeBoostCosts);
             UpdateCostText(1, increasePositiveBoostLevel, increasePositiveBoostCosts);
-            UpdateCostText(2, decreaseSkipTurnLevel, decreaseSkipTurnCosts);
-            UpdateCostText(3, increaseMultiplierLevel, increaseMultiplierCosts);
+            UpdateCostText(2, increaseMultiplierLevel, increaseMultiplierCosts);
         }
     }
 
@@ -155,11 +147,6 @@ public class BoostUpgradeManager : MonoBehaviour
             float basePositiveChance = 0.3f; // Base value from TwoPlayerDiceGame
             float newPositiveChance = Mathf.Min(0.5f, basePositiveChance + (increasePositiveBoostLevel * positiveBoostIncreasePerLevel));
             //diceGame.SetPositiveBoostChance(newPositiveChance);
-            
-            // Reduce skip turn chance
-            float baseSkipTurnChance = 0.15f; // Base value from TwoPlayerDiceGame
-            float newSkipTurnChance = Mathf.Max(0.05f, baseSkipTurnChance - (decreaseSkipTurnLevel * skipTurnReductionPerLevel));
-            //diceGame.SetSkipTurnBoostChance(newSkipTurnChance);
             
             // Increase multiplier chance
             float baseMultiplierChance = 0.15f; // Base value from TwoPlayerDiceGame

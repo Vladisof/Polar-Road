@@ -25,6 +25,11 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
     private int currentDiceResult = 0;
     private bool waitingForPlayerMove = false;
     private InteractiveSpot[] interactiveSpots;
+    private int player1CurrentStage = 1;
+    private int player2CurrentStage = 1;
+    
+    [Header("Stage System")]
+    [SerializeField] private int positionsPerStage = 6;
     
     [Header("Bot Settings")]
     [SerializeField] private float botThinkingDelay = 1.5f; // Delay before bot makes a move
@@ -76,6 +81,7 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
     [SerializeField] private TextMeshProUGUI currentBetText;
     [SerializeField] private int minimumBet = 5;
     [SerializeField] private int betIncrement = 5;
+    [SerializeField] private float playerHeightOffset = 1f;
 
     private string player1Name;
     private string player2Name;
@@ -98,12 +104,10 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
 
     [Range(0f, 1f)] private float boostSpawnChance = 0.3f; // Шанс появления буста на этапе
     [Range(0f, 1f)] private float negativeBoostSpawnChance = 0.2f; // Шанс появления негативного буста
-    [Range(0f, 1f)] private float skipTurnBoostSpawnChance = 0.15f; // Шанс появления буста пропуска хода
     [Range(0f, 1f)] private float multiplierBoostSpawnChance = 0.15f; // Шанс появления буста множителя
-    private int maxBoosts = 3; // Максимальное количество бустов на карте
-    private int maxNegativeBoosts = 2; // Максимальное количество негативных бустов
-    private int maxSkipTurnBoosts = 1; // Максимальное количество бустов пропуска хода
-    private int maxMultiplierBoosts = 2; // Максимальное количество бустов множителя
+    private int maxBoosts = 15; // Максимальное количество бустов на карте
+    private int maxNegativeBoosts = 7; // Максимальное количество негативных бустов
+    private int maxMultiplierBoosts = 8; // Максимальное количество бустов множителя
 
 
     private int player1SpotIndex = 0; // Текущая позиция первого игрока
@@ -134,7 +138,6 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
     private int winPosition = 0; // Позиция для победы (по умолчанию - полный круг)
     private bool player1SkipNextTurn = false;
     private bool player2SkipNextTurn = false;
-    private int skipTurnBoostSpot = -1; // Track which spot has the skip turn boost that was activated
 
     private void Start()
     {
@@ -197,12 +200,12 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
         if (boardSpots.Length > 0)
         {
             if (player1 != null)
-                player1.position = boardSpots[0].position;
+                player1.position = boardSpots[0].position + Vector3.up * playerHeightOffset;
             else
                 Debug.LogError("Player 1 is not assigned!");
 
             if (player2 != null)
-                player2.position = boardSpots[0].position;
+                player2.position = boardSpots[0].position + Vector3.up * playerHeightOffset;
             else
                 Debug.LogError("Player 2 is not assigned!");
         }
@@ -224,7 +227,7 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
         // Инициализация текстовых полей
         if (diceResultText != null)
         {
-            diceResultText.text = "0";
+            diceResultText.text = "";
         }
 
         LoadBoostUpgrades();
@@ -236,33 +239,34 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
     private void SetupInteractiveSpots()
     {
         interactiveSpots = new InteractiveSpot[boardSpots.Length];
-    
+
         for (int i = 0; i < boardSpots.Length; i++)
         {
-            // Проверяем наличие коллайдера
+            // Check for collider
             Collider collider = boardSpots[i].GetComponent<Collider>();
             if (collider == null)
             {
                 Debug.LogWarning($"Spot {i} doesn't have a Collider! Adding BoxCollider.");
                 boardSpots[i].gameObject.AddComponent<BoxCollider>();
             }
-        
+
             InteractiveSpot spot = boardSpots[i].GetComponent<InteractiveSpot>();
             if (spot == null)
             {
                 spot = boardSpots[i].gameObject.AddComponent<InteractiveSpot>();
             }
-        
-            spot.spotIndex = i;
+
+            // Initialize the spot with its index
+            spot.Initialize(i);
             interactiveSpots[i] = spot;
-        
-            // Назначаем материалы
+
+            // Assign materials
             if (interactableMaterial != null)
                 spot.normalMaterial = interactableMaterial;
             if (highlightMaterial != null)
                 spot.highlightMaterial = highlightMaterial;
-        
-            // Изначально все точки неинтерактивны
+
+            // Initially all spots are non-interactive
             spot.SetInteractable(false);
         }
     }
@@ -278,11 +282,6 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
     public void SetNegativeBoostChance(float chance)
     {
         negativeBoostSpawnChance = Mathf.Clamp01(chance);
-    }
-
-    public void SetSkipTurnBoostChance(float chance)
-    {
-        skipTurnBoostSpawnChance = Mathf.Clamp01(chance);
     }
 
     public void SetMultiplierBoostChance(float chance)
@@ -315,8 +314,6 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
             baseNegativeChance - (decreaseNegativeBoostLevel * negativeBoostReductionPerLevel));
         boostSpawnChance = Mathf.Min(0.5f,
             basePositiveChance + (increasePositiveBoostLevel * positiveBoostIncreasePerLevel));
-        skipTurnBoostSpawnChance =
-            Mathf.Max(0.05f, baseSkipTurnChance - (decreaseSkipTurnLevel * skipTurnReductionPerLevel));
         multiplierBoostSpawnChance = Mathf.Min(0.3f,
             baseMultiplierChance + (increaseMultiplierLevel * multiplierBoostIncreasePerLevel));
         Debug.Log("Boost spawn chance: " + boostSpawnChance);
@@ -334,12 +331,12 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
         if (boardSpots.Length > 0)
         {
             if (player1 != null)
-                player1.position = boardSpots[0].position;
+                player1.position = boardSpots[0].position + Vector3.up * playerHeightOffset;
             else
                 Debug.LogError("Player 1 is not assigned!");
 
             if (player2 != null)
-                player2.position = boardSpots[0].position;
+                player2.position = boardSpots[0].position + Vector3.up * playerHeightOffset;
             else
                 Debug.LogError("Player 2 is not assigned!");
         }
@@ -459,7 +456,7 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
             if (boostEffectPrefab != null)
             {
                 GameObject boostEffect = Instantiate(boostEffectPrefab,
-                    boardSpots[spotIndex].position + Vector3.up * 0.1f,
+                    boardSpots[spotIndex].position + Vector3.up * 0.1f+ Vector3.up * playerHeightOffset,
                     Quaternion.identity);
                 boostEffects.Add(boostEffect);
             }
@@ -481,29 +478,7 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
             if (negativeBoostPrefab != null)
             {
                 GameObject boostEffect = Instantiate(negativeBoostPrefab,
-                    boardSpots[spotIndex].position + Vector3.up * 0.1f,
-                    Quaternion.identity);
-                boostEffects.Add(boostEffect);
-            }
-        }
-    }
-
-    // Создание бустов пропуска хода
-    int skipTurnBoostsCreated = 0;
-    while (skipTurnBoostsCreated < maxSkipTurnBoosts)
-    {
-        int spotIndex = Random.Range(1, boardSpots.Length-1);
-
-        if (spotBoostTypes[spotIndex] == BoostType.None && Random.value <= skipTurnBoostSpawnChance)
-        {
-            spotBoostTypes[spotIndex] = BoostType.SkipTurn;
-            skipTurnBoostsCreated++;
-
-            // Создание только визуального эффекта, БЕЗ изменения цвета
-            if (skipTurnBoostPrefab != null)
-            {
-                GameObject boostEffect = Instantiate(skipTurnBoostPrefab,
-                    boardSpots[spotIndex].position + Vector3.up * 0.1f,
+                    boardSpots[spotIndex].position + Vector3.up * 0.1f + Vector3.up * playerHeightOffset,
                     Quaternion.identity);
                 boostEffects.Add(boostEffect);
             }
@@ -525,7 +500,7 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
             if (multiplierBoostPrefab != null)
             {
                 GameObject boostEffect = Instantiate(multiplierBoostPrefab,
-                    boardSpots[spotIndex].position + Vector3.up * 0.1f,
+                    boardSpots[spotIndex].position + Vector3.up * 0.1f + Vector3.up * playerHeightOffset,
                     Quaternion.identity);
                 boostEffects.Add(boostEffect);
             }
@@ -583,7 +558,7 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
         yield return StartCoroutine(wheelController.SpinWheel((value) => result = value));
         
         if (diceResultText != null)
-            diceResultText.text = result.ToString();
+            diceResultText.text = GetColorName(result);
         
         yield return new WaitForSeconds(0.5f);
         
@@ -631,60 +606,92 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
             }
         }
     }
-    private void ShowAvailableSpots(int currentPosition, int diceResult)
+private void ShowAvailableSpots(int currentPosition, int diceResult)
+{
+    Debug.Log($"ShowAvailableSpots called: currentPosition={currentPosition}, diceResult={diceResult}");
+
+    // Сначала делаем все точки неинтерактивными
+    for (int i = 0; i < interactiveSpots.Length; i++)
     {
-        Debug.Log($"ShowAvailableSpots called: currentPosition={currentPosition}, diceResult={diceResult}");
+        interactiveSpots[i].SetInteractable(false);
+    }
 
-        // Сначала делаем все точки неинтерактивными
-        for (int i = 0; i < interactiveSpots.Length; i++)
+    if (diceResult <= 0)
+    {
+        Debug.Log("Dice result is 0 or negative, no movement possible");
+        currentPlayerText.text = $"{(isPlayer1Turn ? player1Name : player2Name)} rolled 0 - turn skipped!";
+        waitingForPlayerMove = false;
+        StartCoroutine(DelayedTurnSwitch());
+        return;
+    }
+
+    // Определяем текущий этап игрока
+    int currentStage = isPlayer1Turn ? player1CurrentStage : player2CurrentStage;
+
+    // КЛЮЧЕВАЯ ЛОГИКА: если игрок уже сделал ход на текущем этапе, переводим его на следующий
+    if (currentPosition > 0) // Если игрок не на стартовой позиции
+    {
+        int positionStage = ((currentPosition - 1) / positionsPerStage) + 1;
+        int nextStage = positionStage + 1;
+
+        // Обновляем этап на следующий
+        if (isPlayer1Turn)
         {
-            interactiveSpots[i].SetInteractable(false);
+            player1CurrentStage = nextStage;
         }
-
-        // Если результат 0 или меньше, игрок не может двигаться
-        if (diceResult <= 0)
+        else
         {
-            Debug.Log("Dice result is 0 or negative, no movement possible");
-            currentPlayerText.text = $"{(isPlayer1Turn ? player1Name : player2Name)} rolled 0 - turn skipped!";
-            waitingForPlayerMove = false;
-            StartCoroutine(DelayedTurnSwitch());
-            return;
+            player2CurrentStage = nextStage;
         }
+        
+        currentStage = nextStage;
+        Debug.Log($"Player moved from stage {positionStage} to stage {nextStage}");
+    }
 
-        Color stepColor = GetColorForStep(diceResult);
-        Debug.Log($"Looking for color: R={stepColor.r:F2}, G={stepColor.g:F2}, B={stepColor.b:F2}");
+    // Вычисляем диапазон позиций для текущего этапа
+    int stageStartIndex = (currentStage - 1) * positionsPerStage + 1;
+    int stageEndIndex = currentStage * positionsPerStage;
 
-        int availableCount = 0;
+    // Убеждаемся, что не выходим за границы массива
+    stageEndIndex = Mathf.Min(stageEndIndex, boardSpots.Length - 1);
 
-        // Проверяем ВСЕ точки на доске после текущей позиции
-        for (int spotIndex = currentPosition + 1; spotIndex < boardSpots.Length; spotIndex++)
+    Debug.Log($"Player at position {currentPosition}, current stage {currentStage}");
+    Debug.Log($"Stage {currentStage}: positions {stageStartIndex} to {stageEndIndex}");
+
+    Color stepColor = GetColorForStep(diceResult);
+    int availableCount = 0;
+
+    // Проверяем только позиции в пределах текущего этапа
+    for (int spotIndex = stageStartIndex; spotIndex <= stageEndIndex; spotIndex++)
+    {
+        // Убеждаемся, что это позиция после текущей
+        if (spotIndex <= currentPosition) continue;
+
+        Renderer renderer = boardSpots[spotIndex].GetComponent<Renderer>();
+        if (renderer != null)
         {
-            Renderer renderer = boardSpots[spotIndex].GetComponent<Renderer>();
-            if (renderer != null)
+            Color spotColor = renderer.material.color;
+            bool matches = ColorEquals(spotColor, stepColor);
+            Debug.Log($"Checking spot {spotIndex}: Expected={stepColor}, Actual={spotColor}, Matches={matches}");
+
+            if (matches)
             {
-                Color spotColor = renderer.material.color;
-                bool matches = ColorEquals(spotColor, stepColor);
-                Debug.Log($"Checking spot {spotIndex}: Expected={stepColor}, Actual={spotColor}, Matches={matches}");
-
-                if (matches)
-                {
-                    Debug.Log($"Making spot {spotIndex} interactable");
-                    interactiveSpots[spotIndex].SetInteractable(true);
-                    availableCount++;
-                }
+                Debug.Log($"Making spot {spotIndex} interactable");
+                interactiveSpots[spotIndex].SetInteractable(true);
+                availableCount++;
             }
         }
-
-        Debug.Log($"Total available spots: {availableCount}");
-
-        // Если нет доступных точек, уведомляем игрока
-        if (availableCount == 0)
-        {
-            currentPlayerText.text = $"{(isPlayer1Turn ? player1Name : player2Name)}, no spots available for this color!";
-            waitingForPlayerMove = false;
-            StartCoroutine(DelayedTurnSwitch());
-        }
     }
+    
+    Debug.Log($"Total available spots: {availableCount}");
+
+    if (availableCount <= 0)
+    {
+        currentPlayerText.text = $"{(isPlayer1Turn ? player1Name : player2Name)}, no spots available for this color in stage {currentStage}!";
+        waitingForPlayerMove = false;
+        StartCoroutine(DelayedTurnSwitch());
+    }
+}
     
     private IEnumerator DelayedTurnSwitch()
     {
@@ -723,23 +730,24 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
         if (!waitingForPlayerMove || !isPlayer1Turn)
             return;
 
-        // Проверяем, что точка интерактивна (это означает что она правильного цвета)
+        // Проверяем, что точка интерактивна и находится в допустимом диапазоне этапа
         if (interactiveSpots[spotIndex].isInteractable)
         {
-            // Проверяем только что точка находится впереди игрока
             int currentPosition = player1SpotIndex;
-        
-            if (spotIndex > currentPosition)
+            int currentStage = player1CurrentStage;
+            int stageStartIndex = (currentStage - 1) * positionsPerStage + 1;
+            int stageEndIndex = currentStage * positionsPerStage;
+            stageEndIndex = Mathf.Min(stageEndIndex, boardSpots.Length - 1);
+
+            if (spotIndex > currentPosition && spotIndex >= stageStartIndex && spotIndex <= stageEndIndex)
             {
                 waitingForPlayerMove = false;
                 HideAvailableSpots();
-
-                // Перемещаем игрока
                 StartCoroutine(MovePlayerToSpot(player1, spotIndex, 1));
             }
             else
             {
-                Debug.Log("Can't move backwards!");
+                Debug.Log($"Invalid move! Must be within stage {currentStage} (positions {stageStartIndex}-{stageEndIndex})");
             }
         }
         else
@@ -759,40 +767,42 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
     private IEnumerator MovePlayerToSpot(Transform playerTransform, int targetSpot, int playerNumber)
     {
         isMoving = true;
-        
+
         int currentPosition = playerNumber == 1 ? player1SpotIndex : player2SpotIndex;
-        
+
         // Анимация бега
         Animator playerAnimator = playerNumber == 1 ? player1Animator : player2Animator;
         if (playerAnimator != null)
         {
             playerAnimator.SetBool("IsRunning", true);
         }
-        
-        // Перемещение по точкам от текущей позиции до целевой
-        for (int i = currentPosition + 1; i <= targetSpot; i++)
-        {
-            yield return StartCoroutine(MoveToNextSpot(playerTransform, i, i - 1));
-            yield return new WaitForSeconds(0.2f);
-        }
-        
+
+        yield return StartCoroutine(MoveToNextSpot(playerTransform, targetSpot, currentPosition));
+
         // Обновляем позицию игрока
         if (playerNumber == 1)
+        {
             player1SpotIndex = targetSpot;
+            // Проверяем, нужно ли перейти на следующий этап
+            CheckStageProgression(1);
+        }
         else
+        {
             player2SpotIndex = targetSpot;
-        
+            CheckStageProgression(2);
+        }
+
         // Останавливаем анимацию бега
         if (playerAnimator != null)
         {
             playerAnimator.SetBool("IsRunning", false);
         }
-        
+
         UpdateUI();
-        
+
         // Обрабатываем действие на точке
         bool shouldSwitchTurn = HandleSpotAction(playerNumber, targetSpot);
-        
+
         // Проверяем победу
         if (CheckWinCondition())
         {
@@ -806,91 +816,42 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
         }
         else
         {
-            // Если не переключаем ход, активируем кнопку броска снова
             if (isPlayer1Turn)
             {
                 rollButton.interactable = true;
             }
         }
-        
+
         isMoving = false;
     }
-    private IEnumerator MovePlayer(Transform playerTransform, int currentIndex, int steps, int playerNumber)
+
+    private void CheckStageProgression(int playerNumber)
     {
-        isMoving = true;
+        int playerPosition = playerNumber == 1 ? player1SpotIndex : player2SpotIndex;
 
-        // Set the Run animation
-        Animator playerAnimator = playerNumber == 1 ? player1Animator : player2Animator;
-        if (playerAnimator != null)
+        // После каждого хода игрок автоматически переходит на следующий этап
+        if (playerPosition > 0) // Если не на стартовой позиции
         {
-            playerAnimator.SetBool("IsRunning", true);
-        }
+            int positionStage = ((playerPosition - 1) / positionsPerStage) + 1;
+            int nextStage = positionStage + 1;
 
-        for (int i = 0; i < steps; i++)
-        {
-            // Вычисление следующей позиции с учетом цикличности доски
-            int nextSpotIndex = (currentIndex + 1) % boardSpots.Length;
-
-            if (nextSpotIndex >= boardSpots.Length || nextSpotIndex < 1)
+            if (playerNumber == 1)
             {
-                break;
+                player1CurrentStage = nextStage;
+                Debug.Log($"Player 1 automatically advanced to stage {player1CurrentStage} after moving to position {playerPosition}");
             }
-
-            // Анимация перемещения к следующей точке
-            yield return StartCoroutine(MoveToNextSpot(playerTransform, nextSpotIndex, currentIndex));
-
-            // Обновление текущей позиции
-            currentIndex = nextSpotIndex;
-
-            // Обновление UI после каждого шага
-            UpdateUI();
-
-            // Небольшая пауза между шагами
-            yield return new WaitForSeconds(0.2f);
-        }
-
-        if (playerNumber == 1)
-            player1SpotIndex = currentIndex;
-        else
-            player2SpotIndex = currentIndex;
-        UpdateUI();
-
-        // Set the Idle animation when movement is complete
-        if (playerAnimator != null)
-        {
-            playerAnimator.SetBool("IsRunning", false);
-        }
-
-        // Проверка специальных действий на новой клетке
-        bool shouldSwitchTurn = HandleSpotAction(playerNumber, currentIndex);
-// Проверка на победу
-        if (CheckWinCondition())
-        {
-            // Обработка победы будет здесь
-            string winner = isPlayer1Turn ? $"{player1Name}" : $"{player2Name}";
-            currentPlayerText.text = winner + " Win!";
-            Debug.Log(winner + " wins!");
-            rollButton.interactable = false;
-        }
-        else
-        {
-            // Переключение хода только если нужно
-            if (shouldSwitchTurn)
+            else
             {
-                SwitchTurn();
+                player2CurrentStage = nextStage;
+                Debug.Log($"Player 2 automatically advanced to stage {player2CurrentStage} after moving to position {playerPosition}");
             }
-
-
-            
         }
-
-        isMoving = false;
     }
 
     private IEnumerator MoveToNextSpot(Transform playerTransform, int spotIndex, int startSpotIndex)
 {
     Vector3 startPosition = playerTransform.position;
-    Vector3 targetPosition = boardSpots[spotIndex].position;
+    Vector3 targetPosition = boardSpots[spotIndex].position + Vector3.up * playerHeightOffset;
     Vector3 startPositionNoY = new Vector3(startPosition.x, 0, startPosition.z);
     Vector3 targetPositionNoY = new Vector3(targetPosition.x, 0, targetPosition.z);
 
@@ -944,28 +905,66 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
 }
     private IEnumerator BotMove(int diceResult)
     {
-        // Бот выбирает случайную доступную точку
+        // Определяем доступные позиции для бота в его текущем этапе
         List<int> availableSpots = new List<int>();
-        
-        for (int i = 1; i <= diceResult; i++)
+
+        int currentStage = player2CurrentStage;
+    
+        // КЛЮЧЕВАЯ ЛОГИКА: если бот уже сделал ход на текущем этапе, переводим его на следующий
+        if (player2SpotIndex > 0) // Если бот не на стартовой позиции
         {
-            int targetSpot = player2SpotIndex + i;
-            if (targetSpot < boardSpots.Length)
+            int positionStage = ((player2SpotIndex - 1) / positionsPerStage) + 1;
+            int nextStage = positionStage + 1;
+            player2CurrentStage = nextStage;
+            currentStage = nextStage;
+            Debug.Log($"Bot moved from stage {positionStage} to stage {nextStage}");
+        }
+
+        int stageStartIndex = (currentStage - 1) * positionsPerStage + 1;
+        int stageEndIndex = currentStage * positionsPerStage;
+        stageEndIndex = Mathf.Min(stageEndIndex, boardSpots.Length - 1);
+
+        Color stepColor = GetColorForStep(diceResult);
+
+        for (int spotIndex = Mathf.Max(player2SpotIndex + 1, stageStartIndex); spotIndex <= stageEndIndex; spotIndex++)
+        {
+            Renderer renderer = boardSpots[spotIndex].GetComponent<Renderer>();
+            if (renderer != null && ColorEquals(renderer.material.color, stepColor))
             {
-                availableSpots.Add(targetSpot);
+                availableSpots.Add(spotIndex);
             }
         }
-        
+
         if (availableSpots.Count > 0)
         {
-            // Бот может выбрать стратегически или случайно
             int chosenSpot = availableSpots[Random.Range(0, availableSpots.Count)];
-            
-            currentPlayerText.text = $"{player2Name} moves to spot {chosenSpot + 1}";
-            
+            currentPlayerText.text = $"{player2Name} moves to spot {chosenSpot + 1} (Stage {player2CurrentStage})";
+
             yield return new WaitForSeconds(0.5f);
-            
             yield return StartCoroutine(MovePlayerToSpot(player2, chosenSpot, 2));
+        
+            // Check if game ended after bot's move - if so, don't continue
+            if (isWinning || !gameStarted)
+            {
+                yield break;
+            }
+        }
+        else
+        {
+            currentPlayerText.text = $"{player2Name} has no available moves in stage {player2CurrentStage}";
+            yield return new WaitForSeconds(1.5f);
+        
+            // Only switch turn if game hasn't ended
+            if (!isWinning && gameStarted)
+            {
+                SwitchTurn();
+            }
+        }
+
+        // Reset the flag only if game is still ongoing
+        if (gameStarted && !isWinning)
+        {
+            waitingForPlayerMove = false;
         }
     }
     
@@ -1011,16 +1010,17 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
                 if (playerNumber == 1)
                 {
                     Debug.Log("Player 1 got a negative boost at spot " + spotIndex);
+                    player1CurrentStage = 1;
                     currentPlayerText.text = $"{player1Name} returns to the first stage!";
-                    player1.position = boardSpots[startSpot].position;
+                    player1.position = boardSpots[startSpot].position + Vector3.up * playerHeightOffset;
                     player1SpotIndex = startSpot;
                 }
                 else
                 {
                     Debug.Log("Player 2 got a negative boost at spot " + spotIndex);
                     currentPlayerText.text = $"{player2Name} returns to the first stage!";
-
-                    player2.position = boardSpots[startSpot].position;
+                    player2CurrentStage = 1;
+                    player2.position = boardSpots[startSpot].position + Vector3.up * playerHeightOffset;
                     player2SpotIndex = startSpot;
                 }
                 audioManager.PlaySound(1);
@@ -1028,7 +1028,7 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
                 if (negativeBoostDisappearEffectPrefab != null)
                 {
                     GameObject disappearEffect = Instantiate(negativeBoostDisappearEffectPrefab,
-                        spotPosition + Vector3.up * 0.5f,
+                        spotPosition + Vector3.up * 0.5f + Vector3.up * playerHeightOffset,
                         Quaternion.identity);
 
                     // Автоматическое удаление эффекта через некоторое время
@@ -1057,7 +1057,7 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
                     if (negativeBoostDisappearEffectPrefab != null)
                     {
                         GameObject disappearEffect = Instantiate(negativeBoostDisappearEffectPrefab,
-                            spotPosition + Vector3.up * 0.5f,
+                            spotPosition + Vector3.up * 0.5f + Vector3.up * playerHeightOffset,
                             Quaternion.identity);
 
                         // Автоматическое удаление эффекта через некоторое время
@@ -1066,15 +1066,14 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
 
                     // Teleport both players to the first spot
                     int startSpot = 0;
-                    player1.position = boardSpots[startSpot].position;
+                    player1.position = boardSpots[startSpot].position + Vector3.up * playerHeightOffset;
                     player1SpotIndex = startSpot;
-                    player2.position = boardSpots[startSpot].position;
+                    player2.position = boardSpots[startSpot].position + Vector3.up * playerHeightOffset;
                     player2SpotIndex = startSpot;
 
                     // Remove the boost
                     spotBoostTypes[spotIndex] = BoostType.None;
                     RemoveBoostEffect(spotIndex);
-                    skipTurnBoostSpot = -1;
                 }
                 else
                 {
@@ -1087,7 +1086,7 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
                         if (skipTurnBoostDisappearEffectPrefab != null)
                         {
                             GameObject disappearEffect = Instantiate(skipTurnBoostDisappearEffectPrefab,
-                                spotPosition + Vector3.up * 0.5f,
+                                spotPosition + Vector3.up * 0.5f + Vector3.up * playerHeightOffset,
                                 Quaternion.identity);
                             boostEffects.Add(disappearEffect);
                         }
@@ -1100,7 +1099,7 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
                         if (skipTurnBoostDisappearEffectPrefab != null)
                         {
                             GameObject disappearEffect = Instantiate(skipTurnBoostDisappearEffectPrefab,
-                                spotPosition + Vector3.up * 0.5f,
+                                spotPosition + Vector3.up * 0.5f + Vector3.up * playerHeightOffset,
                                 Quaternion.identity);
                             boostEffects.Add(disappearEffect);
                         }
@@ -1110,10 +1109,6 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
                         player2SkipTurnSpots.Add(spotIndex); // Add to player 2's list
                     }
                     audioManager.PlaySound(2);
-                    // Save the spot index for later removal
-                    skipTurnBoostSpot = spotIndex;
-                    // We don't remove the boost visual effect yet,
-                    // it will be removed when the player's turn comes again
                 }
             }
             else if (spotBoostTypes[spotIndex] == BoostType.Multiplier)
@@ -1144,39 +1139,26 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
 // Helper method to remove boost effects
     private void RemoveBoostEffect(int spotIndex)
     {
-        // НЕ меняем цвет точки - оставляем как есть
-
         // Удаляем все визуальные эффекты буста для данной точки
         Vector3 spotPosition = boardSpots[spotIndex].position;
 
-        bool foundEffect = true;
-        while (foundEffect)
+        for (int i = boostEffects.Count - 1; i >= 0; i--)
         {
-            foundEffect = false;
-            for (int i = boostEffects.Count - 1; i >= 0; i--)
+            if (boostEffects[i] != null)
             {
-                if (boostEffects[i] == null)
-                {
-                    boostEffects.RemoveAt(i);
-                    continue;
-                }
-
-                float distance = Vector3.Distance(boostEffects[i].transform.position,
-                    spotPosition + Vector3.up * 0.1f);
-
-                float distanceToEffectHeight = Vector3.Distance(
-                    new Vector3(boostEffects[i].transform.position.x,
-                        boostEffects[i].transform.position.y - 0.4f,
-                        boostEffects[i].transform.position.z),
-                    spotPosition + Vector3.up * 0.1f);
-
-                if (distance < 0.5f || distanceToEffectHeight < 0.5f)
+                // Проверяем расстояние между эффектом и позицией точки
+                float distance = Vector3.Distance(boostEffects[i].transform.position, spotPosition);
+                if (distance < 3f) // Допустимое расстояние для считывания эффекта на той же точке
                 {
                     Destroy(boostEffects[i]);
                     boostEffects.RemoveAt(i);
-                    foundEffect = true;
-                    break;
+                    Debug.Log($"Removed boost effect at spot {spotIndex}");
                 }
+            }
+            else
+            {
+                // Удаляем null-ссылки
+                boostEffects.RemoveAt(i);
             }
         }
     }
@@ -1212,23 +1194,78 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
         // Disable roll button during bot's turn
         if (rollButton != null)
             rollButton.interactable = false;
-            
+
+        // Сбрасываем флаг ожидания хода игрока
+        waitingForPlayerMove = false;
+
         // Wait for the "thinking" delay
         yield return new WaitForSeconds(botThinkingDelay);
-        
+
         // Make sure we're still in bot turn mode (game might have ended during the delay)
-        if (isBotTurn && gameStarted && !isMoving && !isRolling && !player2SkipNextTurn)
+        if (isBotTurn && gameStarted && !isMoving && !isRolling)
         {
+            // Проверяем пропуск хода бота
+            if (player2SkipNextTurn)
+            {
+                currentPlayerText.text = $"{player2Name} skips turn due to boost!";
+                player2SkipNextTurn = false;
+                yield return new WaitForSeconds(1.5f);
+                SwitchTurn();
+                yield break;
+            }
+
             currentPlayerText.text = $"{player2Name} is rolling the dice...";
-            
-            // Bot rolls dice
-            RollDice();
+
+            // Bot rolls dice - используем тот же механизм анимации
+            yield return StartCoroutine(DiceRollAnimationForBot());
+        }
+    }
+    
+    private IEnumerator DiceRollAnimationForBot()
+    {
+        isRolling = true;
+
+        WheelController wheelController = FindObjectOfType<WheelController>();
+        if (wheelController == null)
+        {
+            Debug.LogError("WheelController not found!");
+            isRolling = false;
+            yield break;
         }
 
-        if (player2SkipNextTurn)
+        audioManager.PlaySound(0);
+
+        if (diceResultText != null)
+            diceResultText.text = "";
+
+        int result = 0;
+        yield return StartCoroutine(wheelController.SpinWheel((value) => result = value));
+
+        if (diceResultText != null)
+            diceResultText.text = GetColorName(result);
+
+        yield return new WaitForSeconds(0.5f);
+
+        currentDiceResult = result;
+        isRolling = false;
+
+        // Бот ходит автоматически
+        yield return StartCoroutine(BotMove(result));
+    }
+    
+    private string GetColorName(int colorValue)
+    {
+        switch (colorValue)
         {
-            player2SkipNextTurn = false;
-            SwitchTurn();
+            case 0:
+            case 1:
+                return "Red";
+            case 2:
+                return "Yellow";
+            case 3:
+                return "Green";
+            default:
+                return "Red";
         }
     }
     private IEnumerator WaitForReward(bool isPlayer)
@@ -1301,12 +1338,12 @@ public class TwoPlayerDiceGameBot : MonoBehaviour
     {
         if (player1PositionText != null)
         {
-            player1PositionText.text = $"{player1Name}: {player1SpotIndex + 1}/{boardSpots.Length} (x{player1WinMultiplier})";
+            player1PositionText.text = $"{player1Name}: {player1SpotIndex + 1}/{boardSpots.Length} Stage {player1CurrentStage} (x{player1WinMultiplier})";
         }
 
         if (player2PositionText != null)
         {
-            player2PositionText.text = $"{player2Name} (Bot): {player2SpotIndex + 1}/{boardSpots.Length} (x{player2WinMultiplier})";
+            player2PositionText.text = $"{player2Name} (Bot): {player2SpotIndex + 1}/{boardSpots.Length} Stage {player2CurrentStage} (x{player2WinMultiplier})";
         }
     }
 }

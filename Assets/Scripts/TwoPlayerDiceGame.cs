@@ -13,6 +13,24 @@ public class TwoPlayerDiceGame : MonoBehaviour
     [SerializeField] private AudioManager audioManager; // Ссылка на AudioManager
 
     [SerializeField] private Button rollButton; // Кнопка для броска кубика
+    
+    [Header("Click Movement")]
+    [SerializeField] private Material interactableMaterial;
+    [SerializeField] private Material highlightMaterial;
+    
+    [Header("Step Color System")]
+    [SerializeField] private Color step1Color = Color.red;      // Индекс 1 - красный
+    [SerializeField] private Color step2Color = Color.yellow;   // Индекс 2 - желтый
+    [SerializeField] private Color step3Color = Color.green;    // Индекс 3 - зеленый
+    [SerializeField] private Color normalSpotColor = Color.white; // Обычный цвет точек
+    
+    [Header("Stage System")]
+    [SerializeField] private int positionsPerStage = 6;
+    [SerializeField] private float playerHeightOffset = 1f;
+    
+    private int currentDiceResult = 0;
+    private bool waitingForPlayerMove = false;
+    private InteractiveSpot[] interactiveSpots;
 
     [Header("Players Setup")] [SerializeField]
     private Transform player1; // Трансформ первого игрока
@@ -72,19 +90,16 @@ public class TwoPlayerDiceGame : MonoBehaviour
 
     [Range(0f, 1f)] private float boostSpawnChance = 0.3f; // Шанс появления буста на этапе
     [Range(0f, 1f)] private float negativeBoostSpawnChance = 0.2f; // Шанс появления негативного буста
-    [Range(0f, 1f)] private float skipTurnBoostSpawnChance = 0.15f; // Шанс появления буста пропуска хода
     [Range(0f, 1f)] private float multiplierBoostSpawnChance = 0.15f; // Шанс появления буста множителя
-    private int maxBoosts = 3; // Максимальное количество бустов на карте
-    private int maxNegativeBoosts = 2; // Максимальное количество негативных бустов
-    private int maxSkipTurnBoosts = 1; // Максимальное количество бустов пропуска хода
-    private int maxMultiplierBoosts = 2; // Максимальное количество бустов множителя
-    [SerializeField] private Color boostColor = Color.yellow; // Цвет для выделения этапов с бустами
-    [SerializeField] private Color negativeBoostColor = Color.red; // Цвет для выделения этапов с негативными бустами
-    [SerializeField] private Color skipTurnBoostColor = Color.blue; // Цвет для выделения этапов с бустами пропуска хода
-    [SerializeField] private Color multiplierBoostColor = new Color(1f, 0.5f, 0f); // Оранжевый цвет для множителя
+    private int maxBoosts = 15; // Максимальное количество бустов на карте
+    private int maxNegativeBoosts = 7; // Максимальное количество негативных бустов
+    //private int maxSkipTurnBoosts = 5; // Максимальное количество бустов пропуска хода
+    private int maxMultiplierBoosts = 8; // Максимальное количество бустов множителя
 
     private int player1SpotIndex = 0; // Текущая позиция первого игрока
     private int player2SpotIndex = 0; // Текущая позиция второго игрока
+    private int player1CurrentStage = 1; // Текущий этап первого игрока
+    private int player2CurrentStage = 1; // Текущий этап второго игрока
     private int player1WinMultiplier = 2; // Начальный множитель для игрока 1
     private int player2WinMultiplier = 2; // Начальный множитель для игрока 2
     private bool isPlayer1Turn = true; // Флаг для отслеживания чей сейчас ход
@@ -127,6 +142,8 @@ public class TwoPlayerDiceGame : MonoBehaviour
         {
             Debug.LogError("MoneyController not found in scene!");
         }
+
+        SetupInteractiveSpots();
 
         currentBet = minimumBet;
         UpdateBetText();
@@ -172,12 +189,12 @@ public class TwoPlayerDiceGame : MonoBehaviour
         if (boardSpots.Length > 0)
         {
             if (player1 != null)
-                player1.position = boardSpots[0].position;
+                player1.position = boardSpots[0].position + Vector3.up * playerHeightOffset;
             else
                 Debug.LogError("Player 1 is not assigned!");
 
             if (player2 != null)
-                player2.position = boardSpots[0].position;
+                player2.position = boardSpots[0].position + Vector3.up * playerHeightOffset;
             else
                 Debug.LogError("Player 2 is not assigned!");
         }
@@ -199,13 +216,48 @@ public class TwoPlayerDiceGame : MonoBehaviour
         // Инициализация текстовых полей
         if (diceResultText != null)
         {
-            diceResultText.text = "0";
+            diceResultText.text = "";
         }
 
         LoadBoostUpgrades();
         spotBoostTypes = new BoostType[boardSpots.Length];
         // Обновление UI
         UpdateUI();
+    }
+
+    private void SetupInteractiveSpots()
+    {
+        interactiveSpots = new InteractiveSpot[boardSpots.Length];
+
+        for (int i = 0; i < boardSpots.Length; i++)
+        {
+            // Check for collider
+            Collider collider = boardSpots[i].GetComponent<Collider>();
+            if (collider == null)
+            {
+                Debug.LogWarning($"Spot {i} doesn't have a Collider! Adding BoxCollider.");
+                boardSpots[i].gameObject.AddComponent<BoxCollider>();
+            }
+
+            InteractiveSpot spot = boardSpots[i].GetComponent<InteractiveSpot>();
+            if (spot == null)
+            {
+                spot = boardSpots[i].gameObject.AddComponent<InteractiveSpot>();
+            }
+
+            // Initialize the spot with its index
+            spot.Initialize(i);
+            interactiveSpots[i] = spot;
+
+            // Assign materials
+            if (interactableMaterial != null)
+                spot.normalMaterial = interactableMaterial;
+            if (highlightMaterial != null)
+                spot.highlightMaterial = highlightMaterial;
+
+            // Initially all spots are non-interactive
+            spot.SetInteractable(false);
+        }
     }
 
     // Add these methods to TwoPlayerDiceGame.cs
@@ -219,17 +271,12 @@ public class TwoPlayerDiceGame : MonoBehaviour
         negativeBoostSpawnChance = Mathf.Clamp01(chance);
     }
 
-    public void SetSkipTurnBoostChance(float chance)
-    {
-        skipTurnBoostSpawnChance = Mathf.Clamp01(chance);
-    }
-
     public void SetMultiplierBoostChance(float chance)
     {
         multiplierBoostSpawnChance = Mathf.Clamp01(chance);
     }
 
-// Add this method to load boost upgrades from PlayerPrefs
+    // Add this method to load boost upgrades from PlayerPrefs
     private void LoadBoostUpgrades()
     {
         int decreaseNegativeBoostLevel = PlayerPrefs.GetInt("DecreaseNegativeBoostLevel", 0);
@@ -254,8 +301,6 @@ public class TwoPlayerDiceGame : MonoBehaviour
             baseNegativeChance - (decreaseNegativeBoostLevel * negativeBoostReductionPerLevel));
         boostSpawnChance = Mathf.Min(0.5f,
             basePositiveChance + (increasePositiveBoostLevel * positiveBoostIncreasePerLevel));
-        skipTurnBoostSpawnChance =
-            Mathf.Max(0.05f, baseSkipTurnChance - (decreaseSkipTurnLevel * skipTurnReductionPerLevel));
         multiplierBoostSpawnChance = Mathf.Min(0.3f,
             baseMultiplierChance + (increaseMultiplierLevel * multiplierBoostIncreasePerLevel));
         Debug.Log("Boost spawn chance: " + boostSpawnChance);
@@ -273,12 +318,12 @@ public class TwoPlayerDiceGame : MonoBehaviour
         if (boardSpots.Length > 0)
         {
             if (player1 != null)
-                player1.position = boardSpots[0].position;
+                player1.position = boardSpots[0].position + Vector3.up * playerHeightOffset;
             else
                 Debug.LogError("Player 1 is not assigned!");
 
             if (player2 != null)
-                player2.position = boardSpots[0].position;
+                player2.position = boardSpots[0].position + Vector3.up * playerHeightOffset;
             else
                 Debug.LogError("Player 2 is not assigned!");
         }
@@ -290,7 +335,7 @@ public class TwoPlayerDiceGame : MonoBehaviour
         // Инициализация текстовых полей
         if (diceResultText != null)
         {
-            diceResultText.text = "0";
+            diceResultText.text = "";
         }
 
         // Обновление UI
@@ -376,31 +421,27 @@ public class TwoPlayerDiceGame : MonoBehaviour
             spotBoostTypes[i] = BoostType.None;
         }
 
+        // НАЗНАЧАЕМ СЛУЧАЙНЫЕ ЦВЕТА ВСЕМ ТОЧКАМ СРАЗУ ПОСЛЕ СТАРТА
+        AssignRandomColorsToSpots();
+
         // Создание положительных бустов (не на стартовой позиции)
         int boostsCreated = 0;
         while (boostsCreated < maxBoosts)
         {
-            int spotIndex = Random.Range(1, boardSpots.Length-1); // Исключаем стартовую позицию
+            int spotIndex = Random.Range(1, boardSpots.Length-1);
 
             if (spotBoostTypes[spotIndex] == BoostType.None && Random.value <= boostSpawnChance)
             {
                 spotBoostTypes[spotIndex] = BoostType.Positive;
                 boostsCreated++;
 
-                // Создание визуального эффекта
+                // Создание только визуального эффекта, БЕЗ изменения цвета
                 if (boostEffectPrefab != null)
                 {
                     GameObject boostEffect = Instantiate(boostEffectPrefab,
-                        boardSpots[spotIndex].position + Vector3.up * 0.1f,
+                        boardSpots[spotIndex].position + Vector3.up * 0.1f + Vector3.up * playerHeightOffset,
                         Quaternion.identity);
                     boostEffects.Add(boostEffect);
-                }
-
-                // Изменение цвета точки
-                Renderer spotRenderer = boardSpots[spotIndex].GetComponent<Renderer>();
-                if (spotRenderer != null)
-                {
-                    spotRenderer.material.color = boostColor;
                 }
             }
         }
@@ -409,93 +450,80 @@ public class TwoPlayerDiceGame : MonoBehaviour
         int negativeBoostsCreated = 0;
         while (negativeBoostsCreated < maxNegativeBoosts)
         {
-            int spotIndex = Random.Range(1, boardSpots.Length-1); // Исключаем стартовую позицию
+            int spotIndex = Random.Range(1, boardSpots.Length-1);
 
             if (spotBoostTypes[spotIndex] == BoostType.None && Random.value <= negativeBoostSpawnChance)
             {
                 spotBoostTypes[spotIndex] = BoostType.Negative;
                 negativeBoostsCreated++;
 
-                // Создание визуального эффекта
+                // Создание только визуального эффекта, БЕЗ изменения цвета
                 if (negativeBoostPrefab != null)
                 {
                     GameObject boostEffect = Instantiate(negativeBoostPrefab,
-                        boardSpots[spotIndex].position + Vector3.up * 0.1f,
+                        boardSpots[spotIndex].position + Vector3.up * 0.1f + Vector3.up * playerHeightOffset,
                         Quaternion.identity);
                     boostEffects.Add(boostEffect);
-                }
-
-                // Изменение цвета точки
-                Renderer spotRenderer = boardSpots[spotIndex].GetComponent<Renderer>();
-                if (spotRenderer != null)
-                {
-                    spotRenderer.material.color = negativeBoostColor;
                 }
             }
         }
 
-        // Создание бустов пропуска хода
-        int skipTurnBoostsCreated = 0;
-        while (skipTurnBoostsCreated < maxSkipTurnBoosts)
-        {
-            int spotIndex = Random.Range(1, boardSpots.Length-1); // Исключаем стартовую позицию
-
-            if (spotBoostTypes[spotIndex] == BoostType.None && Random.value <= skipTurnBoostSpawnChance)
-            {
-                spotBoostTypes[spotIndex] = BoostType.SkipTurn;
-                skipTurnBoostsCreated++;
-
-                // Создание визуального эффекта
-                if (skipTurnBoostPrefab != null)
-                {
-                    GameObject boostEffect = Instantiate(skipTurnBoostPrefab,
-                        boardSpots[spotIndex].position + Vector3.up * 0.1f,
-                        Quaternion.identity);
-                    boostEffects.Add(boostEffect);
-                }
-
-                // Изменение цвета точки
-                Renderer spotRenderer = boardSpots[spotIndex].GetComponent<Renderer>();
-                if (spotRenderer != null)
-                {
-                    spotRenderer.material.color = skipTurnBoostColor;
-                }
-            }
-        }
-
+        // Создание бустов множителя
         int multiplierBoostsCreated = 0;
         while (multiplierBoostsCreated < maxMultiplierBoosts)
         {
-            int spotIndex = Random.Range(1, boardSpots.Length-1); // Исключаем стартовую позицию
+            int spotIndex = Random.Range(1, boardSpots.Length-1);
 
             if (spotBoostTypes[spotIndex] == BoostType.None && Random.value <= multiplierBoostSpawnChance)
             {
                 spotBoostTypes[spotIndex] = BoostType.Multiplier;
                 multiplierBoostsCreated++;
 
-                // Создание визуального эффекта
+                // Создание только визуального эффекта, БЕЗ изменения цвета
                 if (multiplierBoostPrefab != null)
                 {
                     GameObject boostEffect = Instantiate(multiplierBoostPrefab,
-                        boardSpots[spotIndex].position + Vector3.up * 0.1f,
+                        boardSpots[spotIndex].position + Vector3.up * 0.1f + Vector3.up * playerHeightOffset,
                         Quaternion.identity);
                     boostEffects.Add(boostEffect);
                 }
+            }
+        }
+    }
 
-                // Изменение цвета точки
-                Renderer spotRenderer = boardSpots[spotIndex].GetComponent<Renderer>();
-                if (spotRenderer != null)
+    private void AssignRandomColorsToSpots()
+    {
+        for (int i = 0; i < boardSpots.Length; i++)
+        {
+            // Первая точка (стартовая) остается белой
+            if (i == 0)
+            {
+                Renderer renderer = boardSpots[i].GetComponent<Renderer>();
+                if (renderer != null)
                 {
-                    spotRenderer.material.color = multiplierBoostColor;
+                    renderer.material.color = normalSpotColor;
                 }
+                continue;
+            }
+
+            // Назначаем случайный цвет из трех доступных
+            Color[] availableColors = { step1Color, step2Color, step3Color };
+            Color assignedColor = availableColors[Random.Range(0, 3)];
+
+            Renderer spotRenderer = boardSpots[i].GetComponent<Renderer>();
+            if (spotRenderer != null)
+            {
+                spotRenderer.material.color = assignedColor;
+                Debug.Log($"Spot {i} assigned color: {assignedColor}");
             }
         }
     }
 
     public void RollDice()
     {
-        if (!gameStarted)
+        if (!gameStarted || waitingForPlayerMove)
             return;
+            
         // Проверка, что игрок не движется и кубик не в процессе броска
         if (!isMoving && !isRolling)
         {
@@ -549,174 +577,401 @@ public class TwoPlayerDiceGame : MonoBehaviour
     }
 
     private IEnumerator DiceRollAnimation()
+{
+    isRolling = true;
+    rollButton.interactable = false; // Disable button during roll
+
+    // Get reference to wheel controller
+    WheelController wheelController = FindObjectOfType<WheelController>();
+    if (wheelController == null)
     {
-        isRolling = true;
-        rollButton.interactable = false; // Disable button during roll
-    
-        // Get reference to wheel controller
-        WheelController wheelController = FindObjectOfType<WheelController>();
-        if (wheelController == null)
-        {
-            Debug.LogError("WheelController not found!");
-            isRolling = false;
-            yield break;
-        }
-    
-        // Play spin sound
-        audioManager.PlaySound(0);
-    
-        // Hide result text during spin
-        if (diceResultText != null)
-            diceResultText.text = "";
-    
-        // Spin the wheel and wait for result
-        int result = 0;
-        yield return StartCoroutine(wheelController.SpinWheel((value) => result = value));
-    
-        // Show result
-        if (diceResultText != null)
-            diceResultText.text = result.ToString();
-    
-        yield return new WaitForSeconds(0.5f); // Pause briefly to show the result
-    
+        Debug.LogError("WheelController not found!");
         isRolling = false;
-    
-        // Start moving the current player
-        if (isPlayer1Turn)
-            StartCoroutine(MovePlayer(player1, player1SpotIndex, result, 1));
-        else
-            StartCoroutine(MovePlayer(player2, player2SpotIndex, result, 2));
+        rollButton.interactable = true; // Re-enable if error
+        yield break;
     }
 
-    private IEnumerator MovePlayer(Transform playerTransform, int currentIndex, int steps, int playerNumber)
+    // Check if wheel is already spinning
+    if (wheelController.IsSpinning())
+    {
+        Debug.LogWarning("Wheel is already spinning, waiting...");
+        yield return new WaitUntil(() => !wheelController.IsSpinning());
+    }
+
+    // Play spin sound
+    if (audioManager != null)
+        audioManager.PlaySound(0);
+
+    // Hide result text during spin
+    if (diceResultText != null)
+        diceResultText.text = "";
+
+    // Spin the wheel and wait for result
+    int result = 0;
+    bool spinCompleted = false;
+    
+    yield return StartCoroutine(wheelController.SpinWheel((value) => {
+        result = value;
+        spinCompleted = true;
+    }));
+
+    // Fallback timeout in case wheel doesn't respond
+    float timeout = 10f;
+    while (!spinCompleted && timeout > 0)
+    {
+        timeout -= Time.deltaTime;
+        yield return null;
+    }
+
+    if (!spinCompleted)
+    {
+        Debug.LogError("Wheel spin timed out!");
+        result = Random.Range(1, 4); // Fallback random result
+    }
+
+    if (diceResultText != null)
+        diceResultText.text = GetColorName(result);
+
+    yield return new WaitForSeconds(0.5f); // Pause briefly to show the result
+
+    isRolling = false;
+    currentDiceResult = result;
+
+    // Show available spots for move
+    if (isPlayer1Turn)
+    {
+        ShowAvailableSpots(player1SpotIndex, result);
+    }
+    else
+    {
+        ShowAvailableSpots(player2SpotIndex, result);
+    }
+
+    waitingForPlayerMove = true;
+    currentPlayerText.text = $"{(isPlayer1Turn ? player1Name : player2Name)}, choose a spot to move to!";
+}
+
+    private string GetColorName(int colorValue)
+    {
+        switch (colorValue)
+        {
+            case 0:
+            case 1:
+                return "Red";
+            case 2:
+                return "Yellow";
+            case 3:
+                return "Green";
+            default:
+                return "Red";
+        }
+    }
+    
+    private void ShowAvailableSpots(int currentPosition, int diceResult)
+    {
+        Debug.Log($"ShowAvailableSpots called: currentPosition={currentPosition}, diceResult={diceResult}");
+
+        // Сначала делаем все точки неинтерактивными
+        for (int i = 0; i < interactiveSpots.Length; i++)
+        {
+            interactiveSpots[i].SetInteractable(false);
+        }
+
+        if (diceResult <= 0)
+        {
+            Debug.Log("Dice result is 0 or negative, no movement possible");
+            currentPlayerText.text = $"{(isPlayer1Turn ? player1Name : player2Name)} rolled 0 - turn skipped!";
+            waitingForPlayerMove = false;
+            StartCoroutine(DelayedTurnSwitch());
+            return;
+        }
+
+        // Определяем текущий этап игрока
+        int currentStage = isPlayer1Turn ? player1CurrentStage : player2CurrentStage;
+
+        // КЛЮЧЕВАЯ ЛОГИКА: если игрок уже сделал ход на текущем этапе, переводим его на следующий
+        if (currentPosition > 0) // Если игрок не на стартовой позиции
+        {
+            int positionStage = ((currentPosition - 1) / positionsPerStage) + 1;
+            int nextStage = positionStage + 1;
+
+            // Обновляем этап на следующий
+            if (isPlayer1Turn)
+            {
+                player1CurrentStage = nextStage;
+            }
+            else
+            {
+                player2CurrentStage = nextStage;
+            }
+            
+            currentStage = nextStage;
+            Debug.Log($"Player moved from stage {positionStage} to stage {nextStage}");
+        }
+
+        // Вычисляем диапазон позиций для текущего этапа
+        int stageStartIndex = (currentStage - 1) * positionsPerStage + 1;
+        int stageEndIndex = currentStage * positionsPerStage;
+
+        // Убеждаемся, что не выходим за границы массива
+        stageEndIndex = Mathf.Min(stageEndIndex, boardSpots.Length - 1);
+
+        Debug.Log($"Player at position {currentPosition}, current stage {currentStage}");
+        Debug.Log($"Stage {currentStage}: positions {stageStartIndex} to {stageEndIndex}");
+
+        Color stepColor = GetColorForStep(diceResult);
+        int availableCount = 0;
+
+        // Проверяем только позиции в пределах текущего этапа
+        for (int spotIndex = stageStartIndex; spotIndex <= stageEndIndex; spotIndex++)
+        {
+            // Убеждаемся, что это позиция после текущей
+            if (spotIndex <= currentPosition) continue;
+
+            Renderer renderer = boardSpots[spotIndex].GetComponent<Renderer>();
+            if (renderer != null)
+            {
+                Color spotColor = renderer.material.color;
+                bool matches = ColorEquals(spotColor, stepColor);
+                Debug.Log($"Checking spot {spotIndex}: Expected={stepColor}, Actual={spotColor}, Matches={matches}");
+
+                if (matches)
+                {
+                    Debug.Log($"Making spot {spotIndex} interactable");
+                    interactiveSpots[spotIndex].SetInteractable(true);
+                    availableCount++;
+                }
+            }
+        }
+        
+        Debug.Log($"Total available spots: {availableCount}");
+
+        if (availableCount <= 0)
+        {
+            currentPlayerText.text = $"{(isPlayer1Turn ? player1Name : player2Name)}, no spots available for this color in stage {currentStage}!";
+            waitingForPlayerMove = false;
+            StartCoroutine(DelayedTurnSwitch());
+        }
+    }
+    
+    private IEnumerator DelayedTurnSwitch()
+    {
+        yield return new WaitForSeconds(1.5f);
+        SwitchTurn();
+        waitingForPlayerMove = false;
+        // Reactivate the roll button after switching turns
+        if (rollButton != null && gameStarted)
+        {
+            rollButton.interactable = true;
+        }
+    }
+    
+    private Color GetColorForStep(int stepValue)
+    {
+        switch (stepValue)
+        {
+            case 0:
+                return step1Color; // Красный
+            case 1:
+                return step1Color; // Красный  
+            case 2:
+                return step2Color; // Желтый
+            case 3:
+                return step3Color; // Зеленый
+            default:
+                return step1Color;
+        }
+    }
+
+    private void HideAvailableSpots()
+    {
+        for (int i = 0; i < interactiveSpots.Length; i++)
+        {
+            interactiveSpots[i].SetInteractable(false);
+        }
+        // Цвета точек НЕ меняем - они остаются такими как назначены при старте
+    }
+    
+    public void OnSpotClicked(int spotIndex)
+    {
+        if (!waitingForPlayerMove)
+            return;
+
+        // Проверяем, что точка интерактивна и находится в допустимом диапазоне этапа
+        if (interactiveSpots[spotIndex].isInteractable)
+        {
+            int currentPosition = isPlayer1Turn ? player1SpotIndex : player2SpotIndex;
+            int currentStage = isPlayer1Turn ? player1CurrentStage : player2CurrentStage;
+            int stageStartIndex = (currentStage - 1) * positionsPerStage + 1;
+            int stageEndIndex = currentStage * positionsPerStage;
+            stageEndIndex = Mathf.Min(stageEndIndex, boardSpots.Length - 1);
+
+            if (spotIndex > currentPosition && spotIndex >= stageStartIndex && spotIndex <= stageEndIndex)
+            {
+                waitingForPlayerMove = false;
+                HideAvailableSpots();
+                
+                if (isPlayer1Turn)
+                    StartCoroutine(MovePlayerToSpot(player1, spotIndex, 1));
+                else
+                    StartCoroutine(MovePlayerToSpot(player2, spotIndex, 2));
+            }
+            else
+            {
+                Debug.Log($"Invalid move! Must be within stage {currentStage} (positions {stageStartIndex}-{stageEndIndex})");
+            }
+        }
+        else
+        {
+            Debug.Log("Wrong color clicked!");
+        }
+    }
+    
+    // Вспомогательный метод для сравнения цветов (учитывает небольшие погрешности)
+    private bool ColorEquals(Color a, Color b, float tolerance = 0.01f)
+    {
+        return Mathf.Abs(a.r - b.r) < tolerance &&
+               Mathf.Abs(a.g - b.g) < tolerance &&
+               Mathf.Abs(a.b - b.b) < tolerance;
+    }
+    
+    private IEnumerator MovePlayerToSpot(Transform playerTransform, int targetSpot, int playerNumber)
     {
         isMoving = true;
 
-        // Set the Run animation
+        int currentPosition = playerNumber == 1 ? player1SpotIndex : player2SpotIndex;
+
+        // Анимация бега
         Animator playerAnimator = playerNumber == 1 ? player1Animator : player2Animator;
         if (playerAnimator != null)
         {
             playerAnimator.SetBool("IsRunning", true);
         }
 
-        for (int i = 0; i < steps; i++)
+        yield return StartCoroutine(MoveToNextSpot(playerTransform, targetSpot, currentPosition));
+
+        // Обновляем позицию игрока
+        if (playerNumber == 1)
         {
-            // Вычисление следующей позиции с учетом цикличности доски
-            int nextSpotIndex = (currentIndex + 1) % boardSpots.Length;
-
-            if (nextSpotIndex >= boardSpots.Length || nextSpotIndex < 1)
-            {
-                break;
-            }
-
-            // Анимация перемещения к следующей точке
-            yield return StartCoroutine(MoveToNextSpot(playerTransform, nextSpotIndex, currentIndex));
-
-            // Обновление текущей позиции
-            currentIndex = nextSpotIndex;
-
-            // Обновление UI после каждого шага
-            UpdateUI();
-
-            // Небольшая пауза между шагами
-            yield return new WaitForSeconds(0.2f);
+            player1SpotIndex = targetSpot;
+            // Проверяем, нужно ли перейти на следующий этап
+            CheckStageProgression(1);
+        }
+        else
+        {
+            player2SpotIndex = targetSpot;
+            CheckStageProgression(2);
         }
 
-        if (playerNumber == 1)
-            player1SpotIndex = currentIndex;
-        else
-            player2SpotIndex = currentIndex;
-        UpdateUI();
-
-        // Set the Idle animation when movement is complete
+        // Останавливаем анимацию бега
         if (playerAnimator != null)
         {
             playerAnimator.SetBool("IsRunning", false);
         }
 
-        // Проверка специальных действий на новой клетке
-        bool shouldSwitchTurn = HandleSpotAction(playerNumber, currentIndex);
-// Проверка на победу
+        UpdateUI();
+
+        // Обрабатываем действие на точке
+        bool shouldSwitchTurn = HandleSpotAction(playerNumber, targetSpot);
+
+        // Проверяем победу
         if (CheckWinCondition())
         {
-            // Обработка победы будет здесь
             string winner = isPlayer1Turn ? $"{player1Name}" : $"{player2Name}";
             currentPlayerText.text = winner + " Win!";
-            Debug.Log(winner + " wins!");
             rollButton.interactable = false;
+        }
+        else if (shouldSwitchTurn)
+        {
+            SwitchTurn();
+            rollButton.interactable = true;
         }
         else
         {
-            // Переключение хода только если нужно
-            if (shouldSwitchTurn)
-            {
-                SwitchTurn();
-            }
-
-
-            rollButton.interactable = true; // Активируем кнопку снова
+            rollButton.interactable = true;
         }
 
         isMoving = false;
     }
 
-    private IEnumerator MoveToNextSpot(Transform playerTransform, int spotIndex, int startSpotIndex)
-{
-    Vector3 startPosition = playerTransform.position;
-    Vector3 targetPosition = boardSpots[spotIndex].position;
-    Vector3 startPositionNoY = new Vector3(startPosition.x, 0, startPosition.z);
-    Vector3 targetPositionNoY = new Vector3(targetPosition.x, 0, targetPosition.z);
-
-    float journeyLength = Vector3.Distance(startPositionNoY, targetPositionNoY);
-    float startTime = Time.time;
-    float moveDuration = journeyLength / moveSpeed;
-    float elapsedTime = 0f;
-
-    Debug.Log("Move to spot " + spotIndex);
-
-    while (elapsedTime < moveDuration)
+    private void CheckStageProgression(int playerNumber)
     {
-        elapsedTime = Time.time - startTime;
-        float fractionOfJourney = Mathf.Clamp01(elapsedTime / moveDuration);
-        
-        // Horizontal movement
-        Vector3 horizontalPosition = Vector3.Lerp(startPositionNoY, targetPositionNoY, fractionOfJourney);
-        
-        // Vertical movement (smooth transition between heights + jump animation)
-        float startY = startPosition.y;
-        float targetY = targetPosition.y;
-        float currentBaseY = Mathf.Lerp(startY, targetY, fractionOfJourney);
-        
-        // Jump animation
-        float jumpHeight = 0.5f;
-        float jumpCurve = Mathf.Sin(fractionOfJourney * Mathf.PI) * jumpHeight;
-        
-        // Apply position
-        playerTransform.position = new Vector3(
-            horizontalPosition.x, 
-            currentBaseY + jumpCurve, 
-            horizontalPosition.z
-        );
+        int playerPosition = playerNumber == 1 ? player1SpotIndex : player2SpotIndex;
 
-        // Rotate toward movement direction
-        Vector3 direction = (targetPositionNoY - startPositionNoY).normalized;
-        if (direction != Vector3.zero)
+        // После каждого хода игрок автоматически переходит на следующий этап
+        if (playerPosition > 0) // Если не на стартовой позиции
         {
-            Quaternion targetRotation = Quaternion.LookRotation(direction);
-            playerTransform.rotation = Quaternion.Slerp(
-                playerTransform.rotation, 
-                targetRotation,
-                Time.deltaTime * rotationSpeed
-            );
-        }
+            int positionStage = ((playerPosition - 1) / positionsPerStage) + 1;
+            int nextStage = positionStage + 1;
 
-        yield return null;
+            if (playerNumber == 1)
+            {
+                player1CurrentStage = nextStage;
+                Debug.Log($"Player 1 automatically advanced to stage {player1CurrentStage} after moving to position {playerPosition}");
+            }
+            else
+            {
+                player2CurrentStage = nextStage;
+                Debug.Log($"Player 2 automatically advanced to stage {player2CurrentStage} after moving to position {playerPosition}");
+            }
+        }
     }
 
-    // Ensure final position is exact
-    playerTransform.position = targetPosition;
-    Debug.Log("Move to spot " + spotIndex + " completed");
-}
+    private IEnumerator MoveToNextSpot(Transform playerTransform, int spotIndex, int startSpotIndex)
+    {
+        Vector3 startPosition = playerTransform.position;
+        Vector3 targetPosition = boardSpots[spotIndex].position + Vector3.up * playerHeightOffset;
+        Vector3 startPositionNoY = new Vector3(startPosition.x, 0, startPosition.z);
+        Vector3 targetPositionNoY = new Vector3(targetPosition.x, 0, targetPosition.z);
+
+        float journeyLength = Vector3.Distance(startPositionNoY, targetPositionNoY);
+        float startTime = Time.time;
+        float moveDuration = journeyLength / moveSpeed;
+        float elapsedTime = 0f;
+
+
+        while (elapsedTime < moveDuration)
+        {
+            elapsedTime = Time.time - startTime;
+            float fractionOfJourney = Mathf.Clamp01(elapsedTime / moveDuration);
+            
+            // Horizontal movement
+            Vector3 horizontalPosition = Vector3.Lerp(startPositionNoY, targetPositionNoY, fractionOfJourney);
+            
+            // Vertical movement (smooth transition between heights + jump animation)
+            float startY = startPosition.y;
+            float targetY = targetPosition.y;
+            float currentBaseY = Mathf.Lerp(startY, targetY, fractionOfJourney);
+            
+            // Jump animation
+            float jumpHeight = 0.5f;
+            float jumpCurve = Mathf.Sin(fractionOfJourney * Mathf.PI) * jumpHeight;
+            
+            // Apply position
+            playerTransform.position = new Vector3(
+                horizontalPosition.x, 
+                currentBaseY + jumpCurve, 
+                horizontalPosition.z
+            );
+
+            // Rotate toward movement direction
+            Vector3 direction = (targetPositionNoY - startPositionNoY).normalized;
+            if (direction != Vector3.zero)
+            {
+                Quaternion targetRotation = Quaternion.LookRotation(direction);
+                playerTransform.rotation = Quaternion.Slerp(
+                    playerTransform.rotation, 
+                    targetRotation,
+                    Time.deltaTime * rotationSpeed
+                );
+            }
+
+            yield return null;
+        }
+
+        // Ensure final position is exact
+        playerTransform.position = targetPosition;
+    }
 
     private bool HandleSpotAction(int playerNumber, int spotIndex)
     {
@@ -740,7 +995,7 @@ public class TwoPlayerDiceGame : MonoBehaviour
                     Debug.Log("Player 2 got a boost at spot " + spotIndex);
                     currentPlayerText.text = $"{player2Name} got a boost at spot!";
                 }
-audioManager.PlaySound(2);
+                audioManager.PlaySound(2);
                 // Don't switch turns when positive boost is found
                 shouldSwitchTurn = false;
 
@@ -755,25 +1010,25 @@ audioManager.PlaySound(2);
                 if (playerNumber == 1)
                 {
                     Debug.Log("Player 1 got a negative boost at spot " + spotIndex);
+                    player1CurrentStage = 1;
                     currentPlayerText.text = $"{player1Name} returns to the first stage!";
-
-                    player1.position = boardSpots[startSpot].position;
+                    player1.position = boardSpots[startSpot].position + Vector3.up * playerHeightOffset;
                     player1SpotIndex = startSpot;
                 }
                 else
                 {
                     Debug.Log("Player 2 got a negative boost at spot " + spotIndex);
                     currentPlayerText.text = $"{player2Name} returns to the first stage!";
-
-                    player2.position = boardSpots[startSpot].position;
+                    player2CurrentStage = 1;
+                    player2.position = boardSpots[startSpot].position + Vector3.up * playerHeightOffset;
                     player2SpotIndex = startSpot;
                 }
-audioManager.PlaySound(1);
+                audioManager.PlaySound(1);
                 // Создаём эффект исчезновения негативного буста
                 if (negativeBoostDisappearEffectPrefab != null)
                 {
                     GameObject disappearEffect = Instantiate(negativeBoostDisappearEffectPrefab,
-                        spotPosition + Vector3.up * 0.5f,
+                        spotPosition + Vector3.up * 0.5f + Vector3.up * playerHeightOffset,
                         Quaternion.identity);
 
                     // Автоматическое удаление эффекта через некоторое время
@@ -802,7 +1057,7 @@ audioManager.PlaySound(1);
                     if (negativeBoostDisappearEffectPrefab != null)
                     {
                         GameObject disappearEffect = Instantiate(negativeBoostDisappearEffectPrefab,
-                            spotPosition + Vector3.up * 0.5f,
+                            spotPosition + Vector3.up * 0.5f + Vector3.up * playerHeightOffset,
                             Quaternion.identity);
 
                         // Автоматическое удаление эффекта через некоторое время
@@ -811,10 +1066,12 @@ audioManager.PlaySound(1);
 
                     // Teleport both players to the first spot
                     int startSpot = 0;
-                    player1.position = boardSpots[startSpot].position;
+                    player1.position = boardSpots[startSpot].position + Vector3.up * playerHeightOffset;
                     player1SpotIndex = startSpot;
-                    player2.position = boardSpots[startSpot].position;
+                    player1CurrentStage = 1;
+                    player2.position = boardSpots[startSpot].position + Vector3.up * playerHeightOffset;
                     player2SpotIndex = startSpot;
+                    player2CurrentStage = 1;
 
                     // Remove the boost
                     spotBoostTypes[spotIndex] = BoostType.None;
@@ -825,14 +1082,14 @@ audioManager.PlaySound(1);
                 {
                     // Normal skip turn logic
                     // Set flag to skip next turn
-// When player lands on skip turn boost, store in their list
+                    // When player lands on skip turn boost, store in their list
                     if (playerNumber == 1)
                     {
                         currentPlayerText.text = $"{player1Name} will miss the next turn!";
                         if (skipTurnBoostDisappearEffectPrefab != null)
                         {
                             GameObject disappearEffect = Instantiate(skipTurnBoostDisappearEffectPrefab,
-                                spotPosition + Vector3.up * 0.5f,
+                                spotPosition + Vector3.up * 0.5f + Vector3.up * playerHeightOffset,
                                 Quaternion.identity);
                             boostEffects.Add(disappearEffect);
                         }
@@ -845,7 +1102,7 @@ audioManager.PlaySound(1);
                         if (skipTurnBoostDisappearEffectPrefab != null)
                         {
                             GameObject disappearEffect = Instantiate(skipTurnBoostDisappearEffectPrefab,
-                                spotPosition + Vector3.up * 0.5f,
+                                spotPosition + Vector3.up * 0.5f + Vector3.up * playerHeightOffset,
                                 Quaternion.identity);
                             boostEffects.Add(disappearEffect);
                         }
@@ -854,11 +1111,9 @@ audioManager.PlaySound(1);
                         player2SkipNextTurn = true;
                         player2SkipTurnSpots.Add(spotIndex); // Add to player 2's list
                     }
-
+                    audioManager.PlaySound(2);
                     // Save the spot index for later removal
                     skipTurnBoostSpot = spotIndex;
-                    // We don't remove the boost visual effect yet,
-                    // it will be removed when the player's turn comes again
                 }
             }
             else if (spotBoostTypes[spotIndex] == BoostType.Multiplier)
@@ -875,7 +1130,7 @@ audioManager.PlaySound(1);
                     Debug.Log("Player 2 got multiplier boost at spot " + spotIndex);
                     currentPlayerText.text = $"{player2Name} got multiplier boost x{player2WinMultiplier}!";
                 }
-audioManager.PlaySound(3);
+                audioManager.PlaySound(3);
                 UpdateUI();
                 // Удаляем буст после использования
                 spotBoostTypes[spotIndex] = BoostType.None;
@@ -886,49 +1141,29 @@ audioManager.PlaySound(3);
         return shouldSwitchTurn;
     }
 
-// Helper method to remove boost effects
+    // Helper method to remove boost effects
     private void RemoveBoostEffect(int spotIndex)
     {
-        // Возвращаем цвет точки
-        Renderer spotRenderer = boardSpots[spotIndex].GetComponent<Renderer>();
-        if (spotRenderer != null)
-        {
-            spotRenderer.material.color = Color.green;
-        }
-
         // Удаляем все визуальные эффекты буста для данной точки
         Vector3 spotPosition = boardSpots[spotIndex].position;
 
-        // Use a while loop to repeatedly check for and remove any effects near this spot
-        bool foundEffect = true;
-        while (foundEffect)
+        for (int i = boostEffects.Count - 1; i >= 0; i--)
         {
-            foundEffect = false;
-            for (int i = boostEffects.Count - 1; i >= 0; i--)
+            if (boostEffects[i] != null)
             {
-                if (boostEffects[i] == null)
-                {
-                    boostEffects.RemoveAt(i);
-                    continue;
-                }
-
-                // Check if the effect is near this spot (both at normal height and effect height)
-                float distance = Vector3.Distance(boostEffects[i].transform.position,
-                    spotPosition + Vector3.up * 0.1f);
-
-                float distanceToEffectHeight = Vector3.Distance(
-                    new Vector3(boostEffects[i].transform.position.x,
-                        boostEffects[i].transform.position.y - 0.4f,
-                        boostEffects[i].transform.position.z),
-                    spotPosition + Vector3.up * 0.1f);
-
-                if (distance < 0.5f || distanceToEffectHeight < 0.5f)
+                // Проверяем расстояние между эффектом и позицией точки
+                float distance = Vector3.Distance(boostEffects[i].transform.position, spotPosition);
+                if (distance < 3f) // Допустимое расстояние для считывания эффекта на той же точке
                 {
                     Destroy(boostEffects[i]);
                     boostEffects.RemoveAt(i);
-                    foundEffect = true;
-                    break; // Break the for loop, but continue the while loop
+                    Debug.Log($"Removed boost effect at spot {spotIndex}");
                 }
+            }
+            else
+            {
+                // Удаляем null-ссылки
+                boostEffects.RemoveAt(i);
             }
         }
     }
@@ -936,7 +1171,6 @@ audioManager.PlaySound(3);
     private void SwitchTurn()
     {
         isPlayer1Turn = !isPlayer1Turn;
-
 
         if (isPlayer1Turn)
         {
@@ -953,8 +1187,9 @@ audioManager.PlaySound(3);
     private IEnumerator WaitForReward()
     {
         yield return new WaitForSeconds(4f);
-winPL.SetActive(true);
+        winPL.SetActive(true);
     }
+    
     private bool CheckWinCondition()
     {
         Debug.Log(
@@ -981,6 +1216,10 @@ winPL.SetActive(true);
 
             if (decreaseBetButton != null)
                 decreaseBetButton.interactable = true;
+                
+            if (startGameButton != null)
+                startGameButton.interactable = true;
+                
             StartCoroutine(WaitForReward());
             gameStarted = false;
             return true;
@@ -993,7 +1232,7 @@ winPL.SetActive(true);
             {
                 int reward = currentBet * player2WinMultiplier;
                 moneyController.AddMoney(reward);
-                winText.text = $"{player2Name}  wins! Received {reward} coins (x{player2WinMultiplier})!";
+                winText.text = $"{player2Name} wins! Received {reward} coins (x{player2WinMultiplier})!";
             }
 
             if (player1Animator != null)
@@ -1006,6 +1245,10 @@ winPL.SetActive(true);
 
             if (decreaseBetButton != null)
                 decreaseBetButton.interactable = true;
+                
+            if (startGameButton != null)
+                startGameButton.interactable = true;
+                
             StartCoroutine(WaitForReward());
             gameStarted = false;
             return true;
@@ -1018,12 +1261,12 @@ winPL.SetActive(true);
     {
         if (player1PositionText != null)
         {
-            player1PositionText.text = $"{player1Name}: {player1SpotIndex + 1}/{boardSpots.Length} (x{player1WinMultiplier})";
+            player1PositionText.text = $"{player1Name}: {player1SpotIndex + 1}/{boardSpots.Length} Stage {player1CurrentStage} (x{player1WinMultiplier})";
         }
 
         if (player2PositionText != null)
         {
-            player2PositionText.text = $"{player2Name}: {player2SpotIndex + 1}/{boardSpots.Length} (x{player2WinMultiplier})";
+            player2PositionText.text = $"{player2Name}: {player2SpotIndex + 1}/{boardSpots.Length} Stage {player2CurrentStage} (x{player2WinMultiplier})";
         }
 
         if (currentPlayerText != null && !isWinning)
@@ -1035,3 +1278,4 @@ winPL.SetActive(true);
         }
     }
 }
+
